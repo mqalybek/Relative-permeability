@@ -197,9 +197,12 @@ def _standardize(raw, source: str):
             df["sw"] = 1.0 - df["shg"]
         # Pc in bar when the unit is in the header; NaN factor -> default units later
         df["pc_bar_factor"] = pc_factor if pc_factor is not None else np.nan
-        system = df["system"].map(lab_system) if "system" in df else None
-        fallback = lab_system(source)
-        df["pc_system"] = system.fillna(fallback) if system is not None else fallback
+        fallback = lab_system(source)  # e.g. "101 MICP"; None if the name says nothing
+        if "system" in df:
+            system = df["system"].map(lab_system)
+            df["pc_system"] = system if fallback is None else system.fillna(fallback)
+        else:
+            df["pc_system"] = fallback
     return pd.DataFrame(df)
 
 
