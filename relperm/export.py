@@ -17,7 +17,7 @@ def _eclipse_keyword(keyword: str, header: str, rock_types, table_fn, keys, poin
     lines = [keyword]
     for rt in rock_types:
         lines.append(f"-- {rt.name}{': ' + rt.description if rt.description else ''}")
-        lines.append(f"-- {header}")
+        lines.append(f"-- {header.format(u=rt.pc_units)}")
         t = table_fn(rt, points)
         lines += _rows([t[k] for k in keys])
         lines.append("/")
@@ -26,28 +26,28 @@ def _eclipse_keyword(keyword: str, header: str, rock_types, table_fn, keys, poin
 
 def swof(rock_types: Iterable[RockType], points: int = 20) -> str:
     return _eclipse_keyword(
-        "SWOF", "      Sw          krw          krow         Pcow",
+        "SWOF", "      Sw          krw          krow         Pcow({u})",
         rock_types, RockType.water_oil_table, ("Sw", "krw", "krow", "Pcow"), points,
     )
 
 
 def sgof(rock_types: Iterable[RockType], points: int = 20) -> str:
     return _eclipse_keyword(
-        "SGOF", "      Sg          krg          krog         Pcog",
+        "SGOF", "      Sg          krg          krog         Pcog({u})",
         rock_types, RockType.gas_oil_table, ("Sg", "krg", "krog", "Pcog"), points,
     )
 
 
 def swfn(rock_types: Iterable[RockType], points: int = 20) -> str:
     return _eclipse_keyword(
-        "SWFN", "      Sw          krw          Pcow",
+        "SWFN", "      Sw          krw          Pcow({u})",
         rock_types, RockType.water_oil_table, ("Sw", "krw", "Pcow"), points,
     )
 
 
 def sgfn(rock_types: Iterable[RockType], points: int = 20) -> str:
     return _eclipse_keyword(
-        "SGFN", "      Sg          krg          Pcog",
+        "SGFN", "      Sg          krg          Pcog({u})",
         rock_types, RockType.gas_oil_table, ("Sg", "krg", "Pcog"), points,
     )
 
@@ -67,13 +67,13 @@ def cmg(rock_types: Iterable[RockType], points: int = 20) -> str:
         lines.append(f"** {rt.name}{': ' + rt.description if rt.description else ''}")
         wo = rt.water_oil_table(points)
         lines.append("*SWT")
-        lines.append("**     Sw          krw          krow         Pcow")
+        lines.append(f"**     Sw          krw          krow         Pcow({rt.pc_units})")
         lines += _rows([wo["Sw"], wo["krw"], wo["krow"], wo["Pcow"]])
         # CMG tabulates gas-liquid data against liquid saturation, ascending.
         go = rt.gas_oil_table(points)
         sl = 1.0 - go["Sg"][::-1]
         lines.append("*SLT")
-        lines.append("**     Sl          krg          krog         Pcog")
+        lines.append(f"**     Sl          krg          krog         Pcog({rt.pc_units})")
         lines += _rows([sl, go["krg"][::-1], go["krog"][::-1], go["Pcog"][::-1]])
         lines.append("")
     return "\n".join(lines)

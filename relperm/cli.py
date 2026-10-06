@@ -7,7 +7,7 @@ import json
 import sys
 
 from .export import FORMATS, export
-from .fit import fit_corey, read_columns
+from .fit import fit_brooks_corey, fit_corey, read_columns
 from .models import RockType
 
 
@@ -56,7 +56,7 @@ def cmd_plot(args):
     import numpy as np
 
     rock_types, _ = load_config(args.config)
-    fig, (ax_wo, ax_go) = plt.subplots(1, 2, figsize=(12, 5))
+    fig, (ax_wo, ax_go, ax_pc) = plt.subplots(1, 3, figsize=(17, 5))
     for rt in rock_types:
         sw = np.linspace(rt.swl, 1, 400)
         sg = np.linspace(rt.sgl, 1 - rt.swl, 400)
@@ -64,6 +64,8 @@ def cmd_plot(args):
         ax_wo.plot(sw, rt.krow(sw), lw=2, ls="--", label=f"{rt.name} krow")
         ax_go.plot(sg, rt.krg(sg), lw=2, label=f"{rt.name} krg")
         ax_go.plot(sg, rt.krog(sg), lw=2, ls="--", label=f"{rt.name} krog")
+        ax_pc.plot(sw, rt.pc_ow(sw), lw=2, label=f"{rt.name} Pcow(Sw)")
+        ax_pc.plot(sg, rt.pc_og(sg), lw=2, ls="--", label=f"{rt.name} Pcog(Sg)")
     for ax, title, xl in ((ax_wo, "Water-oil", "Sw"), (ax_go, "Gas-oil", "Sg")):
         ax.set(title=title, xlabel=xl, ylabel="kr", xlim=(0, 1))
         if args.log:
@@ -73,6 +75,11 @@ def cmd_plot(args):
             ax.set_ylim(0, 1.02)
         ax.grid(which="both", alpha=0.4)
         ax.legend(fontsize=8)
+    units = sorted({rt.pc_units for rt in rock_types})
+    ax_pc.set(title="Capillary pressure", xlabel="Sw (Pcow) / Sg (Pcog)",
+              ylabel=f"Pc, {'/'.join(units)}", xlim=(0, 1))
+    ax_pc.grid(which="both", alpha=0.4)
+    ax_pc.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(args.output, dpi=150)
     print(f"Saved {args.output}", file=sys.stderr)
@@ -80,6 +87,16 @@ def cmd_plot(args):
 
 def cmd_fit(args):
     data = read_columns(args.csv)
+    if args.phase in ("pcow", "pcog"):
+        if args.phase == "pcow":
+            res = fit_brooks_corey(data[args.s_col or "Sw"], data[args.kr_col or "Pcow"],
+                                   args.swl, 1 - args.sorw)
+        else:
+            res = fit_brooks_corey(1 - data[args.s_col or "Sg"], data[args.kr_col or "Pcog"],
+                                   args.swl + args.sorg, 1.0)
+        print(f"pe     = {res.pe:.4g}\nlam    = {res.lam:.3f}\n"
+              f"RMSE   = {res.rmse:.4g} ({res.used} points)")
+        return
     if args.phase == "w":
         res = fit_corey(data[args.s_col or "Sw"], data[args.kr_col or "krw"],
                         args.swcr, 1 - args.sorw, args.krmax)
@@ -133,10 +150,10 @@ def main(argv=None):
     pl.add_argument("--log", action="store_true", help="logarithmic kr axis")
     pl.set_defaults(func=cmd_plot)
 
-    f = sub.add_parser("fit", help="fit Corey kr_max and exponent to lab points")
+    f = sub.add_parser("fit", help="fit Corey kr or Brooks-Corey Pc to lab points")
     f.add_argument("csv")
-    f.add_argument("--phase", choices=["w", "ow", "g", "og"], required=True,
-                   help="w=krw, ow=krow, g=krg, og=krog")
+    f.add_argument("--phase", choices=["w", "ow", "g", "og", "pcow", "pcog"], required=True,
+                   help="w=krw, ow=krow, g=krg, og=krog (Corey); pcow, pcog (Brooks-Corey)")
     f.add_argument("--swl", type=float, default=0.0)
     f.add_argument("--swcr", type=float, default=0.0)
     f.add_argument("--sorw", type=float, default=0.0)
@@ -144,7 +161,7 @@ def main(argv=None):
     f.add_argument("--sgcr", type=float, default=0.0)
     f.add_argument("--krmax", type=float, help="fix the endpoint, fit only n")
     f.add_argument("--s-col", help="saturation column name")
-    f.add_argument("--kr-col", help="kr column name")
+    f.add_argument("--kr-col", help="kr (or Pc) column name")
     f.set_defaults(func=cmd_fit)
 
     t = sub.add_parser("template", help="print a config template")

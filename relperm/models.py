@@ -9,6 +9,10 @@ Saturation conventions (Eclipse-style names):
     sgcr   critical gas saturation (krg = 0 for Sg <= sgcr)
     sogcr  residual oil saturation to gas (Sorg)
 
+Capillary pressure (optional, zero when not set) uses the same normalization
+as the oil curves: Pcow on (Sw - swl) / (1 - swl - sowcr), Pcog on the liquid
+saturation (Sl - swl - sogcr) / (1 - sgl - swl - sogcr). See capillary.py.
+
 Endpoints:
 
     krwr   krw at Sw = 1 - sowcr
@@ -22,9 +26,11 @@ Endpoints:
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Union
+from typing import Optional, Union
 
 import numpy as np
+
+from .capillary import PcModel, _check_units, height_above_fwl, pc_from, pc_to_dict
 
 
 @dataclass(frozen=True)
@@ -109,12 +115,18 @@ class RockType:
     krogcg: float = 0.9
     ng: Shape = 2.0
     nog: Shape = 1.5
+    # capillary pressure (None -> 0), values in pc_units
+    pcow: Optional[PcModel] = None
+    pcog: Optional[PcModel] = None
+    pc_units: str = "bar"
     # optional comment written to exported tables
     description: str = field(default="", repr=False)
 
     def __post_init__(self):
         for attr in ("nw", "now", "ng", "nog"):
             setattr(self, attr, shape_from(getattr(self, attr)))
+        self.pcow = pc_from(self.pcow)
+        self.pcog = pc_from(self.pcog)
         if self.krwmax is None:
             self.krwmax = self.krwr
         if self.krgmax is None:
@@ -140,6 +152,10 @@ class RockType:
         need(self.sgcr < 1.0 - self.swl - self.sogcr, "sgcr + swl + sogcr must be < 1")
         need(self.sgl + self.swl + self.sogcr < 1.0, "sgl + swl + sogcr must be < 1")
         need(self.krgmax >= self.krgr, "krgmax must be >= krgr")
+        try:
+            _check_units(self.pc_units)
+        except ValueError as e:
+            errors.append(str(e))
         if errors:
             raise ValueError(f"Rock type '{self.name}': " + "; ".join(errors))
 
@@ -178,6 +194,25 @@ class RockType:
         lo = self.swl + self.sogcr
         return self.krogcg * evaluate_shape(normalize(sl, lo, 1.0 - self.sgl), self.nog)
 
+    # ------------------------------------------------------ capillary pressure
+    def pc_ow(self, sw):
+        sw = np.asarray(sw, dtype=float)
+        if self.pcow is None:
+            return np.zeros_like(sw)
+        return self.pcow.pc(normalize(sw, self.swl, 1.0 - self.sowcr), self.pc_units)
+
+    def pc_og(self, sg):
+        sl = 1.0 - np.asarray(sg, dtype=float)
+        if self.pcog is None:
+            return np.zeros_like(sl)
+        sn = normalize(sl, self.swl + self.sogcr, 1.0 - self.sgl)
+        return self.pcog.pc(sn, self.pc_units)
+
+    def height_above_fwl(self, sw, drho: float = 250.0):
+        """Height (m) above the free water level at which water saturation is sw,
+        for oil-water density difference drho (kg/m3) — a saturation-height check."""
+        return height_above_fwl(self.pc_ow(sw), drho, self.pc_units)
+
     # ---------------------------------------------------------------- tables
     def sw_grid(self, points: int = 20):
         return _grid(self.swl, 1.0, points, [self.swcr, 1.0 - self.sowcr])
@@ -187,11 +222,11 @@ class RockType:
 
     def water_oil_table(self, points: int = 20) -> dict[str, np.ndarray]:
         sw = self.sw_grid(points)
-        return {"Sw": sw, "krw": self.krw(sw), "krow": self.krow(sw), "Pcow": np.zeros_like(sw)}
+        return {"Sw": sw, "krw": self.krw(sw), "krow": self.krow(sw), "Pcow": self.pc_ow(sw)}
 
     def gas_oil_table(self, points: int = 20) -> dict[str, np.ndarray]:
         sg = self.sg_grid(points)
-        return {"Sg": sg, "krg": self.krg(sg), "krog": self.krog(sg), "Pcog": np.zeros_like(sg)}
+        return {"Sg": sg, "krg": self.krg(sg), "krog": self.krog(sg), "Pcog": self.pc_og(sg)}
 
     def oil_table(self, points: int = 20) -> dict[str, np.ndarray]:
         """SOF3-style table: So, krow(So), krog(So) with Sl = So + swl."""
@@ -217,7 +252,9 @@ class RockType:
         return np.divide(lw, total, out=np.zeros_like(total), where=total > 0)
 
     def to_dict(self) -> dict:
-        return asdict(self)  # LET shapes become {"L", "E", "T"} dicts
+        d = asdict(self)  # LET shapes become {"L", "E", "T"} dicts
+        d["pcow"], d["pcog"] = pc_to_dict(self.pcow), pc_to_dict(self.pcog)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "RockType":

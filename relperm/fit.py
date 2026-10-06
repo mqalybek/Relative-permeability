@@ -1,4 +1,4 @@
-"""Fit Corey endpoint and exponent to laboratory (SCAL) points.
+"""Fit Corey (kr) and Brooks-Corey (Pc) parameters to laboratory (SCAL) points.
 
 kr = kr_max * sn**n  ->  ln kr = ln kr_max + n ln sn, so the fit is a linear
 least-squares problem in log space and needs no optimizer.
@@ -40,8 +40,8 @@ def fit_corey(s, kr, s_lo: float, s_hi: float, kr_max: float | None = None) -> C
         kr_max = float(np.exp(ln_a))
     else:
         n = float(np.sum(x * (y - np.log(kr_max))) / np.sum(x * x))
-    pred = kr_max * normalize(s, s_lo, s_hi) ** n
-    rmse = float(np.sqrt(np.mean((pred[mask] - kr[mask]) ** 2)))
+    pred = kr_max * sn[mask] ** n
+    rmse = float(np.sqrt(np.mean((pred - kr[mask]) ** 2)))
     return CoreyFit(kr_max=float(kr_max), n=float(n), rmse=rmse, used=int(mask.sum()))
 
 
@@ -56,3 +56,23 @@ def read_columns(path: str) -> dict[str, np.ndarray]:
     data = np.array([[float(v.replace(",", ".")) if dialect.delimiter != "," else float(v)
                       for v in r] for r in rows[1:] if any(c.strip() for c in r)])
     return {h: data[:, i] for i, h in enumerate(header)}
+
+
+@dataclass
+class BrooksCoreyFit:
+    pe: float
+    lam: float
+    rmse: float  # in pressure units, over the points used
+    used: int
+
+
+def fit_brooks_corey(s, pc, s_lo: float, s_hi: float) -> BrooksCoreyFit:
+    """Fit Pc = pe * Sn**(-1/lam) with Sn = (s - s_lo) / (s_hi - s_lo).
+
+    For Pcow pass s = Sw, s_lo = Swl, s_hi = 1 - Sorw; for Pcog pass s = Sl = 1 - Sg,
+    s_lo = Swl + Sorg, s_hi = 1 - Sgl. Same log-space regression as fit_corey.
+    """
+    res = fit_corey(s, pc, s_lo, s_hi)
+    if res.n >= 0:
+        raise ValueError("Pc does not decrease with wetting saturation; not a drainage curve")
+    return BrooksCoreyFit(pe=res.kr_max, lam=-1.0 / res.n, rmse=res.rmse, used=res.used)

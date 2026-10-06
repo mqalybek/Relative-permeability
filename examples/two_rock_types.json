@@ -3,23 +3,69 @@
   "rock_types": [
     {
       "name": "SAND",
-      "description": "good sandstone, Corey",
-      "swl": 0.18, "swcr": 0.18, "sowcr": 0.11,
-      "krwr": 0.6, "krwmax": 1.0, "krocw": 0.9,
-      "nw": 3, "now": 3,
-      "sgl": 0.0, "sgcr": 0.05, "sogcr": 0.11,
-      "krgr": 0.1, "krgmax": 0.4, "krogcg": 0.9,
-      "ng": 2, "nog": 1.5
+      "description": "good sandstone, Corey kr, Brooks-Corey Pc",
+      "swl": 0.18,
+      "swcr": 0.18,
+      "sowcr": 0.11,
+      "krwr": 0.6,
+      "krwmax": 1.0,
+      "krocw": 0.9,
+      "nw": 3,
+      "now": 3,
+      "sgl": 0.0,
+      "sgcr": 0.05,
+      "sogcr": 0.11,
+      "krgr": 0.1,
+      "krgmax": 0.4,
+      "krogcg": 0.9,
+      "ng": 2,
+      "nog": 1.5,
+      "pc_units": "bar",
+      "pcow": {
+        "model": "brooks-corey",
+        "pe": 0.05,
+        "lam": 2.0,
+        "pcmax": 2.0
+      },
+      "pcog": {
+        "model": "brooks-corey",
+        "pe": 0.02,
+        "lam": 2.5,
+        "pcmax": 1.0
+      }
     },
     {
       "name": "SHALY",
-      "description": "shaly sand, LET for water",
-      "swl": 0.30, "swcr": 0.32, "sowcr": 0.20,
-      "krwr": 0.3, "krocw": 0.7,
-      "nw": {"L": 2.5, "E": 1.5, "T": 1.2}, "now": 2.5,
-      "sgl": 0.0, "sgcr": 0.05, "sogcr": 0.18,
-      "krgr": 0.25, "krogcg": 0.7,
-      "ng": 2.5, "nog": 2.0
+      "description": "shaly sand, LET krw, Leverett J Pc",
+      "swl": 0.3,
+      "swcr": 0.32,
+      "sowcr": 0.2,
+      "krwr": 0.3,
+      "krocw": 0.7,
+      "nw": {
+        "L": 2.5,
+        "E": 1.5,
+        "T": 1.2
+      },
+      "now": 2.5,
+      "sgl": 0.0,
+      "sgcr": 0.05,
+      "sogcr": 0.18,
+      "krgr": 0.25,
+      "krogcg": 0.7,
+      "ng": 2.5,
+      "nog": 2.0,
+      "pc_units": "bar",
+      "pcow": {
+        "model": "leverett",
+        "a": 0.25,
+        "b": 1.2,
+        "perm": 15,
+        "poro": 0.17,
+        "ift": 25,
+        "theta": 0,
+        "pcmax": 5.0
+      }
     }
   ]
 }
