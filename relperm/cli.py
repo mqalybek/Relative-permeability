@@ -1,9 +1,10 @@
-"""Command line interface: relperm {app,export,plot,fit,template}."""
+"""Command line interface: relperm {scal,app,export,plot,fit,template}."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from .export import FORMATS, export
@@ -113,6 +114,42 @@ def cmd_fit(args):
           f"RMSE   = {res.rmse:.4g} ({res.used} points)")
 
 
+def cmd_scal(args):
+    from .scal import build_rock_types, read_scal, write_report
+
+    data = read_scal(*args.files)
+    for path, sheet, kind in data.sources:
+        print(f"  {os.path.basename(path)} [{sheet}]: {kind}", file=sys.stderr)
+    bins = [float(b) for b in args.perm_bins.split(",")] if args.perm_bins else []
+    res = build_rock_types(data, group_by=args.group_by, perm_bins=bins,
+                           endpoints=args.endpoints, align_kro=not args.no_align_kro)
+    for w in res.warnings:
+        print(f"warning: {w}", file=sys.stderr)
+    for s in res.samples:
+        for note in s.notes:
+            print(f"note [{s.sample}]: {note}", file=sys.stderr)
+
+    print(f"\n{'rock type':<14}{'n':>3} {'Swl':>6}{'Sorw':>7}{'krwr':>7}{'krocw':>7}"
+          f"{'nw':>6}{'now':>6} {'Sgcr':>6}{'Sorg':>7}{'krgr':>7}{'ng':>6}{'nog':>6}")
+    for rt in res.rock_types:
+        n = len(res.groups[rt.name])
+        print(f"{rt.name:<14}{n:>3} {rt.swl:6.3f}{rt.sowcr:7.3f}{rt.krwr:7.3f}{rt.krocw:7.3f}"
+              f"{rt.nw:6.2f}{rt.now:6.2f} {rt.sgcr:6.3f}{rt.sogcr:7.3f}{rt.krgr:7.3f}"
+              f"{rt.ng:6.2f}{rt.nog:6.2f}")
+    for c in res.correlations:
+        print(f"  {c['endpoint']:<7}= {c['a']:.4f} {c['b']:+.4f}*lg(k)   R2={c['r2']:.2f} (n={c['n']})")
+
+    written = write_report(res, args.output, args.points)
+    if args.export:
+        ext = "inc" if args.export.startswith("eclipse") else "dat"
+        path = os.path.join(args.output, f"relperm_{args.export}.{ext}")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(export(res.rock_types, args.export, args.points))
+        written.append(path)
+    print(f"\nSaved to {args.output}/: " + ", ".join(os.path.basename(p) for p in written),
+          file=sys.stderr)
+
+
 def cmd_app(args):
     rock_types, points = load_config(args.config)
     rt = next((r for r in rock_types if r.name == args.rock), None) if args.rock else rock_types[0]
@@ -128,6 +165,18 @@ def cmd_app(args):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="relperm", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    sc = sub.add_parser("scal", help="build rock types from SCAL lab data (CSV / Excel)")
+    sc.add_argument("files", nargs="+", help="CSV / XLSX files; all sheets are read")
+    sc.add_argument("-o", "--output", default="scal_out", help="output directory")
+    sc.add_argument("--group-by", choices=["auto", "rock_type", "perm", "none"], default="auto")
+    sc.add_argument("--perm-bins", help="permeability class edges in mD, e.g. 10,100")
+    sc.add_argument("--endpoints", choices=["mean", "median"], default="mean")
+    sc.add_argument("--no-align-kro", action="store_true",
+                    help="keep krog(Sg=0) from gas-oil data instead of krow(Swl)")
+    sc.add_argument("-f", "--export", choices=FORMATS, help="also write simulator tables")
+    sc.add_argument("-n", "--points", type=int, default=20)
+    sc.set_defaults(func=cmd_scal)
 
     a = sub.add_parser("app", help="interactive editor with sliders")
     a.add_argument("config", nargs="?")

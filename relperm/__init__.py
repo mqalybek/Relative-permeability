@@ -10,4 +10,4 @@ __all__ = [
     "LET", "RockType", "BrooksCorey", "LeverettJ", "height_above_fwl", "export",
     "fit_corey", "CoreyFit", "fit_brooks_corey", "BrooksCoreyFit",
 ]
-__version__ = "0.2.0"
+__version__ = "0.3.0"
