@@ -11,6 +11,8 @@ from .export import FORMATS, export
 from .fit import fit_brooks_corey, fit_corey, read_columns
 from .models import RockType
 
+LAB_SYSTEMS_NAMES = ("mercury-air", "air-brine", "oil-brine")
+
 
 def load_config(path: str | None) -> tuple[list[RockType], int]:
     if path is None:
@@ -115,14 +117,16 @@ def cmd_fit(args):
 
 
 def cmd_scal(args):
-    from .scal import build_rock_types, read_scal, write_report
+    from .scal import PcOptions, build_rock_types, read_scal, write_report
 
     data = read_scal(*args.files)
     for path, sheet, kind in data.sources:
         print(f"  {os.path.basename(path)} [{sheet}]: {kind}", file=sys.stderr)
     bins = [float(b) for b in args.perm_bins.split(",")] if args.perm_bins else []
+    pc = PcOptions(lab_units=args.pc_lab_units, system=args.pc_system, ift_res=args.ift_res,
+                   theta_res=args.theta_res, units=args.pc_units, drho=args.drho)
     res = build_rock_types(data, group_by=args.group_by, perm_bins=bins,
-                           endpoints=args.endpoints, align_kro=not args.no_align_kro)
+                           endpoints=args.endpoints, align_kro=not args.no_align_kro, pc=pc)
     for w in res.warnings:
         print(f"warning: {w}", file=sys.stderr)
     for s in res.samples:
@@ -139,7 +143,23 @@ def cmd_scal(args):
     for c in res.correlations:
         print(f"  {c['endpoint']:<7}= {c['a']:.4f} {c['b']:+.4f}*lg(k)   R2={c['r2']:.2f} (n={c['n']})")
 
-    written = write_report(res, args.output, args.points)
+    with_pc = [rt for rt in res.rock_types if rt.pcow is not None]
+    if with_pc:
+        print(f"\nCapillary pressure, reservoir oil-water (sigma={pc.ift_res:g} mN/m, "
+              f"theta={pc.theta_res:g} deg), units {pc.units}:")
+        for rt in with_pc:
+            m = rt.pcow
+            entry = float(rt.pc_ow(1 - rt.sowcr))
+            h = float(rt.height_above_fwl(1 - rt.sowcr, pc.drho))
+            n = sum(s.kind == "pc" for s in res.groups[rt.name])
+            if m.model == "leverett":
+                desc = f"J = {m.a:.4g}*Sn^-{m.b:.4g}, k = {m.perm:.4g} mD, phi = {m.poro:.3g}"
+            else:
+                desc = f"Brooks-Corey pe = {m.pe:.4g}, lambda = {m.lam:.4g}"
+            print(f"  {rt.name:<14}{n:>2} samples  {desc}, Pcmax = {m.pcmax:.4g}; "
+                  f"entry {entry:.4g} -> {h:.1f} m above FWL")
+
+    written = write_report(res, args.output, args.points, pc)
     if args.export:
         ext = "inc" if args.export.startswith("eclipse") else "dat"
         path = os.path.join(args.output, f"relperm_{args.export}.{ext}")
@@ -159,7 +179,8 @@ def cmd_app(args):
 
     run(rt, points=points, out_dir=args.out_dir,
         lab_wo=read_columns(args.lab_wo) if args.lab_wo else None,
-        lab_go=read_columns(args.lab_go) if args.lab_go else None)
+        lab_go=read_columns(args.lab_go) if args.lab_go else None,
+        lab_pc=read_columns(args.lab_pc) if args.lab_pc else None)
 
 
 def main(argv=None):
@@ -175,6 +196,18 @@ def main(argv=None):
     sc.add_argument("--no-align-kro", action="store_true",
                     help="keep krog(Sg=0) from gas-oil data instead of krow(Swl)")
     sc.add_argument("-f", "--export", choices=FORMATS, help="also write simulator tables")
+    sc.add_argument("--pc-lab-units", choices=["psi", "kPa", "MPa", "bar", "atm"],
+                    help="lab Pc units when the column header has none")
+    sc.add_argument("--pc-system", choices=list(LAB_SYSTEMS_NAMES),
+                    help="lab fluid pair when the data do not say (default air-brine)")
+    sc.add_argument("--ift-res", type=float, default=30.0,
+                    help="reservoir oil-water IFT, mN/m (default 30)")
+    sc.add_argument("--theta-res", type=float, default=30.0,
+                    help="reservoir contact angle, degrees (default 30)")
+    sc.add_argument("--pc-units", choices=["bar", "psi", "kPa", "atm"], default="bar",
+                    help="Pc units of the output tables")
+    sc.add_argument("--drho", type=float, default=250.0,
+                    help="oil-water density difference for heights above FWL, kg/m3")
     sc.add_argument("-n", "--points", type=int, default=20)
     sc.set_defaults(func=cmd_scal)
 
@@ -184,6 +217,7 @@ def main(argv=None):
     a.add_argument("--out-dir", default=".", help="where export buttons save files")
     a.add_argument("--lab-wo", help="CSV with lab Sw, krw, krow to overlay")
     a.add_argument("--lab-go", help="CSV with lab Sg, krg, krog to overlay")
+    a.add_argument("--lab-pc", help="CSV with lab Sw, Pcow to overlay")
     a.set_defaults(func=cmd_app)
 
     e = sub.add_parser("export", help="write simulator tables")

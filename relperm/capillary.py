@@ -21,7 +21,8 @@ import numpy as np
 SN_FLOOR = 0.01
 
 # multiply Pa by this to get the unit
-PRESSURE_UNITS = {"bar": 1e-5, "psi": 1.0 / 6894.757, "kPa": 1e-3, "atm": 1.0 / 101325.0}
+PRESSURE_UNITS = {"bar": 1e-5, "psi": 1.0 / 6894.757, "kPa": 1e-3, "MPa": 1e-6,
+                  "atm": 1.0 / 101325.0}
 MILLIDARCY_M2 = 9.869233e-16
 G = 9.80665
 

@@ -72,7 +72,7 @@ def test_validation():
     with pytest.raises(ValueError, match="Unknown Pc model"):
         RockType(pcow={"model": "thomeer", "pe": 1})
     with pytest.raises(ValueError, match="pressure units"):
-        RockType(pc_units="MPa")
+        RockType(pc_units="mmHg")
 
 
 def test_roundtrip_and_export_units():

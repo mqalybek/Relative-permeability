@@ -47,7 +47,8 @@ COLORS = {"w": "#1f77b4", "o": "#2ca02c", "g": "#d62728", "fw": "#9467bd"}
 
 class RelPermApp:
     def __init__(self, rock_type: RockType | None = None, points: int = 20,
-                 out_dir: str = ".", lab_wo: dict | None = None, lab_go: dict | None = None):
+                 out_dir: str = ".", lab_wo: dict | None = None, lab_go: dict | None = None,
+                 lab_pc: dict | None = None):
         self.initial = rock_type or RockType()
         self.rt = self.initial
         self.points = points
@@ -81,6 +82,9 @@ class RelPermApp:
         self.p_wo, = self.ax_wo.plot([], [], "o", ms=4, color="k", alpha=0.6, label="table")
         self.p_go, = self.ax_go.plot([], [], "o", ms=4, color="k", alpha=0.6, label="table")
         self._plot_lab(lab_wo, lab_go)
+        if lab_pc:
+            self.ax_pc.plot(lab_pc["Sw"], lab_pc["Pcow"], "s", mfc="none", color=COLORS["w"],
+                            label="Pcow lab")
 
         for ax, title, xl in ((self.ax_wo, "Water-oil (SWOF / SWT)", "Sw"),
                               (self.ax_go, "Gas-oil (SGOF / SLT)", "Sg"),
