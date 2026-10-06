@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "relperm"
+version = "0.1.0"
+description = "Corey / LET relative permeability curves with interactive editor and Eclipse / CMG table export"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.21", "matplotlib>=3.5"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+relperm = "relperm.cli:main"
+
+[tool.setuptools]
+packages = ["relperm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
