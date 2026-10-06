@@ -161,8 +161,7 @@ def cmd_scal(args):
 
     written = write_report(res, args.output, args.points, pc)
     if args.export:
-        ext = "inc" if args.export.startswith("eclipse") else "dat"
-        path = os.path.join(args.output, f"relperm_{args.export}.{ext}")
+        path = os.path.join(args.output, f"relperm_{args.export}.inc")
         with open(path, "w", encoding="utf-8") as f:
             f.write(export(res.rock_types, args.export, args.points))
         written.append(path)

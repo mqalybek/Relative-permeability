@@ -40,7 +40,7 @@ PC_FIELDS = {
     "leverett": [("a", "J a", 0.0, None), ("b", "J b", 0.1, 5.0),
                  ("perm", "k, mD", 1.0, None), ("pcmax", "Pcmax", 0.0, None)],
 }
-UNIT_SCALE = {"bar": 1.0, "atm": 1.0, "psi": 14.5, "kPa": 100.0}
+UNIT_SCALE = {"bar": 1.0, "atm": 1.0, "psi": 14.5, "kPa": 100.0, "MPa": 0.1}
 
 COLORS = {"w": "#1f77b4", "o": "#2ca02c", "g": "#d62728", "fw": "#9467bd"}
 
@@ -86,8 +86,8 @@ class RelPermApp:
             self.ax_pc.plot(lab_pc["Sw"], lab_pc["Pcow"], "s", mfc="none", color=COLORS["w"],
                             label="Pcow lab")
 
-        for ax, title, xl in ((self.ax_wo, "Water-oil (SWOF / SWT)", "Sw"),
-                              (self.ax_go, "Gas-oil (SGOF / SLT)", "Sg"),
+        for ax, title, xl in ((self.ax_wo, "Water-oil (SWOF)", "Sw"),
+                              (self.ax_go, "Gas-oil (SGOF)", "Sg"),
                               (self.ax_pc, "Capillary pressure", "Sw (Pcow) / Sg (Pcog)"),
                               (self.ax_fw, "Water fractional flow", "Sw")):
             ax.set_title(title)
@@ -155,8 +155,9 @@ class RelPermApp:
         self.chk.on_clicked(self._toggle_log)
 
         self.buttons = []
-        for i, (label, cb) in enumerate((("Export Eclipse", lambda _: self._export("eclipse")),
-                                         ("Export CMG", lambda _: self._export("cmg")),
+        for i, (label, cb) in enumerate((("Export SWOF/SGOF", lambda _: self._export("eclipse")),
+                                         ("Export SWFN/SGFN/SOF3",
+                                          lambda _: self._export("eclipse2")),
                                          ("Reset", lambda _: self._reset()))):
             b = Button(self.fig.add_axes([x, 0.17 - i * 0.06, 0.12, 0.045]), label)
             b.on_clicked(cb)
@@ -249,8 +250,7 @@ class RelPermApp:
         self.s_drho.reset()
 
     def _export(self, fmt):
-        ext = "inc" if fmt.startswith("eclipse") else "dat"
-        path = os.path.join(self.out_dir, f"{self.rt.name}_{fmt}.{ext}")
+        path = os.path.join(self.out_dir, f"{self.rt.name}_{fmt}.inc")
         with open(path, "w") as f:
             f.write(export([self.rt], fmt, self.points))
         self.status.set_text(f"Saved {os.path.abspath(path)}")

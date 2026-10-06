@@ -84,7 +84,7 @@ def test_roundtrip_and_export_units():
     assert RockType.from_dict(d) == rt
     text = export([rt], "eclipse", 10)
     assert "Pcow(psi)" in text and "Pcog(psi)" in text
-    assert "Pcog(psi)" in export([rt], "cmg", 10)
+    assert "Pcog(psi)" in export([rt], "eclipse2", 10)
 
 
 def test_fit_brooks_corey():

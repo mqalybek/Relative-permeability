@@ -118,8 +118,8 @@ def test_perm_bins():
 
 def test_cli_scal(tmp_path):
     out = tmp_path / "out"
-    main(["scal", str(EXAMPLES / "scal_lab_report.xlsx"), "-o", str(out), "-f", "cmg"])
-    for name in ("rock_types.json", "samples.csv", "correlations.csv", "relperm_cmg.dat",
+    main(["scal", str(EXAMPLES / "scal_lab_report.xlsx"), "-o", str(out), "-f", "eclipse2"])
+    for name in ("rock_types.json", "samples.csv", "correlations.csv", "relperm_eclipse2.inc",
                  "qc_Песчаник.png", "lab_Песчаник_wo.csv", "endpoints_vs_perm.png"):
         assert (out / name).exists(), name
     rock_types, _ = load_config(str(out / "rock_types.json"))

@@ -1,4 +1,4 @@
-"""Write saturation tables in Eclipse / OPM / tNavigator and CMG formats."""
+"""Write saturation tables as Eclipse keywords (Eclipse, tNavigator, OPM Flow, Petrel import)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Iterable, Sequence
 
 from .models import RockType
 
-FORMATS = ("eclipse", "eclipse2", "cmg")
+FORMATS = ("eclipse", "eclipse2")
 
 
 def _rows(columns: Sequence, fmt: str = "{:12.6f}") -> list[str]:
@@ -59,38 +59,15 @@ def sof3(rock_types: Iterable[RockType], points: int = 20) -> str:
     )
 
 
-def cmg(rock_types: Iterable[RockType], points: int = 20) -> str:
-    """CMG IMEX/GEM/STARS *ROCKFLUID section with *SWT and *SLT tables."""
-    lines = ["*ROCKFLUID"]
-    for i, rt in enumerate(rock_types, start=1):
-        lines.append(f"*RPT {i}")
-        lines.append(f"** {rt.name}{': ' + rt.description if rt.description else ''}")
-        wo = rt.water_oil_table(points)
-        lines.append("*SWT")
-        lines.append(f"**     Sw          krw          krow         Pcow({rt.pc_units})")
-        lines += _rows([wo["Sw"], wo["krw"], wo["krow"], wo["Pcow"]])
-        # CMG tabulates gas-liquid data against liquid saturation, ascending.
-        go = rt.gas_oil_table(points)
-        sl = 1.0 - go["Sg"][::-1]
-        lines.append("*SLT")
-        lines.append(f"**     Sl          krg          krog         Pcog({rt.pc_units})")
-        lines += _rows([sl, go["krg"][::-1], go["krog"][::-1], go["Pcog"][::-1]])
-        lines.append("")
-    return "\n".join(lines)
-
-
 def export(rock_types: Sequence[RockType], fmt: str = "eclipse", points: int = 20) -> str:
     """Render all rock types in one of FORMATS.
 
-    eclipse  -> SWOF + SGOF (family I; also OPM Flow, tNavigator)
+    eclipse  -> SWOF + SGOF (family I)
     eclipse2 -> SWFN + SGFN + SOF3 (family II)
-    cmg      -> *ROCKFLUID with *SWT / *SLT
     """
     rock_types = list(rock_types)
     if fmt == "eclipse":
         return swof(rock_types, points) + "\n" + sgof(rock_types, points)
     if fmt == "eclipse2":
         return "\n".join(f(rock_types, points) for f in (swfn, sgfn, sof3))
-    if fmt == "cmg":
-        return cmg(rock_types, points)
     raise ValueError(f"Unknown format '{fmt}', expected one of {FORMATS}")

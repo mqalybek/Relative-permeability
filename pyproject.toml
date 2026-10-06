@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "relperm"
 version = "0.4.0"
-description = "Corey / LET relative permeability and Brooks-Corey / Leverett J capillary pressure with interactive editor and Eclipse / CMG table export"
+description = "Corey / LET relative permeability and Brooks-Corey / Leverett J capillary pressure with interactive editor and Eclipse / tNavigator table export"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ["numpy>=1.21", "matplotlib>=3.5"]

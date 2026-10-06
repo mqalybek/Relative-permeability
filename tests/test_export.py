@@ -44,22 +44,9 @@ def test_eclipse_family_two():
     assert sof3[-1, 1] == pytest.approx(0.9) and sof3[-1, 2] == pytest.approx(0.9)
 
 
-def test_cmg():
-    text = export([RockType()], "cmg", 10)
-    assert text.startswith("*ROCKFLUID")
-    swt = _table(text, "*SWT", "**")
-    assert swt[0, 0] == pytest.approx(0.18)
-    slt = _table(text, "*SLT", "**")
-    assert np.all(np.diff(slt[:, 0]) > 0)  # Sl ascending
-    assert slt[0, 0] == pytest.approx(0.18)  # Sl starts at Swl
-    assert slt[-1, 0] == pytest.approx(1.0)
-    assert slt[-1, 1] == 0  # krg = 0 at Sl = 1
-    assert slt[-1, 2] == pytest.approx(0.9)  # krog = krocw at Sg = 0
-
-
 def test_unknown_format():
     with pytest.raises(ValueError):
-        export([RockType()], "petrel")
+        export([RockType()], "cmg")
 
 
 def test_cli_roundtrip(tmp_path, capsys):

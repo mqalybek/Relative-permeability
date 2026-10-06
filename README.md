@@ -1,4 +1,4 @@
-# relperm — интерактивные ОФП и Pc с экспортом в Eclipse и CMG
+# relperm — интерактивные ОФП и Pc для Eclipse, tNavigator и Petrel
 
 Строит кривые относительной фазовой проницаемости (ОФП: Corey / LET) и капиллярного давления
 (Brooks–Corey / J-функция Леверетта) для систем вода–нефть и газ–нефть — вручную или
@@ -7,9 +7,11 @@
 
 | Формат        | Ключевые слова              | Где работает                       |
 |---------------|-----------------------------|------------------------------------|
-| `eclipse`     | `SWOF` + `SGOF`             | Eclipse 100/300, OPM Flow, tNavigator |
-| `eclipse2`    | `SWFN` + `SGFN` + `SOF3`    | Eclipse (family II), OPM, tNavigator  |
-| `cmg`         | `*ROCKFLUID`, `*SWT`, `*SLT`| CMG IMEX / GEM / STARS             |
+| `eclipse`     | `SWOF` + `SGOF`             | Eclipse 100/300, tNavigator, OPM Flow |
+| `eclipse2`    | `SWFN` + `SGFN` + `SOF3`    | Eclipse (family II), tNavigator, OPM  |
+
+Файл `.inc` подключается в секцию `PROPS` через `INCLUDE` (Eclipse, tNavigator) или импортируется в Petrel
+(Import file → тип файла Eclipse keywords) как функции насыщенности.
 
 ![interactive editor](docs/app.png)
 
@@ -28,7 +30,7 @@ pip install -e ".[test]"  # + pytest
 
 ```bash
 relperm scal отчёт_ОФП.xlsx -o scal_out -f eclipse
-relperm scal wo.csv go.xlsx --group-by perm --perm-bins 10,100 -f cmg
+relperm scal wo.csv go.xlsx --group-by perm --perm-bins 10,100 -f eclipse2
 relperm app scal_out/rock_types.json --rock Песчаник --lab-wo scal_out/lab_Песчаник_wo.csv \
     --lab-go scal_out/lab_Песчаник_go.csv --lab-pc scal_out/lab_Песчаник_pc.csv
 ```
@@ -102,7 +104,7 @@ Capillary pressure, reservoir oil-water (sigma=30 mN/m, theta=30 deg), units bar
 | `qc_<тип>.png` | замеры + кривая типа пород, нормированные точки + подбор |
 | `qc_pc_<тип>.png` | Pc: лабораторные кривые, J-функция с подбором, пластовая Pcow + высота над ЗСВ |
 | `lab_<тип>_wo.csv`, `lab_<тип>_go.csv`, `lab_<тип>_pc.csv` | замеры для наложения в интерактивном окне |
-| `relperm_<формат>.inc/.dat` | таблицы для симулятора (с `-f`) |
+| `relperm_<формат>.inc` | таблицы для симулятора (с `-f`) |
 
 ![SCAL QC](docs/scal_qc.png)
 
@@ -121,12 +123,12 @@ relperm template -o my_field.json                      # шаблон конфи
 relperm app my_field.json                              # интерактивный редактор
 relperm app my_field.json --rock SAND --lab-wo examples/lab_water_oil.csv   # + керновые точки
 relperm export my_field.json -f eclipse -o relperm.inc # SWOF/SGOF для всех типов пород
-relperm export my_field.json -f cmg -o rockfluid.dat   # *SWT/*SLT
+relperm export my_field.json -f eclipse2 -o relperm2.inc # SWFN/SGFN/SOF3
 relperm plot my_field.json --log -o curves.png         # картинка для отчёта
 ```
 
 Пример конфига с двумя типами пород (SATNUM 1, 2) — [`examples/two_rock_types.json`](examples/two_rock_types.json).
-Порядок `rock_types` = номер таблицы (`SATNUM` в Eclipse, `*RPT` в CMG).
+Порядок `rock_types` = номер таблицы `SATNUM`.
 
 ### Интерактивный редактор
 
@@ -136,12 +138,12 @@ relperm plot my_field.json --log -o curves.png         # картинка для
 * лог-шкала по kr — удобно смотреть «хвосты» krw/krow при адаптации;
 * кривая доли воды `fw(Sw)` с ползунком `μo/μw` — сразу видно, как форма ОФП влияет на фронт Баклея–Леверетта;
 * недопустимые комбинации (например `Swcr < Swl`) подсвечиваются красным и не ломают график;
-* кнопки **Export Eclipse / Export CMG** пишут `<имя>_eclipse.inc` и `<имя>_cmg.dat`.
+* кнопки **Export SWOF/SGOF** и **Export SWFN/SGFN/SOF3** пишут `<имя>_eclipse.inc` и `<имя>_eclipse2.inc`.
 
 ## Капиллярное давление
 
 Задаётся в конфиге типа пород полями `pcow` / `pcog` (без них Pc = 0, как раньше) и единицами `pc_units`:
-`bar` (Eclipse METRIC), `psi` (FIELD), `kPa` (CMG SI), `atm`.
+`bar` (METRIC), `psi` (FIELD), `atm`, `kPa`, `MPa`.
 
 ```json
 "pc_units": "bar",
@@ -218,7 +220,7 @@ krog = krogcg · Sn^nog, Sn = (1 − Sg − Swl − Sorg) / (1 − Sgl − Swl �
 
 ## Что исправлено относительно оригинального скрипта
 
-1. **Экспорта не было вовсе**, хотя README его обещал — теперь SWOF/SGOF, SWFN/SGFN/SOF3 и CMG SWT/SLT, несколько типов пород.
+1. **Экспорта не было вовсе**, хотя README его обещал — теперь SWOF/SGOF и SWFN/SGFN/SOF3, несколько типов пород.
 2. `(отрицательное число) ** n` давало NaN/отрицательные kr у остаточной нефти; это лечилось ручным
    `SWT['Krow'].iloc[-1] = 0` (chained assignment, в pandas ≥ 3 молча не работает). Теперь нормированная насыщенность обрезается в [0, 1].
 3. SWOF начинался с захардкоженного `0.18` и заканчивался на `1 − Sorw`; Eclipse ждёт таблицу от `Swl` до 1, SGOF — от 0 до `1 − Swl`.
