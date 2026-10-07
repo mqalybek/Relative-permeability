@@ -198,7 +198,18 @@ def cmd_app(args):
         lab_pc=read_columns(args.lab_pc) if args.lab_pc else None)
 
 
+def _safe_console():
+    """Windows consoles (cp1251/cp1252) cannot print every symbol we use (·, −, Кво);
+    replace what does not fit instead of crashing."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    _safe_console()
     p = argparse.ArgumentParser(prog="relperm", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
