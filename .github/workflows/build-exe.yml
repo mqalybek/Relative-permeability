@@ -5,9 +5,13 @@ on:
   push:
     branches: [main, "claude/**"]
   workflow_dispatch:
+concurrency:
+  group: build-exe-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   windows-exe:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -16,17 +20,23 @@ jobs:
       - run: pip install ".[scal]" pyinstaller
       - name: Check tkinter (file dialogs)
         run: python -c "import tkinter; print(tkinter.TkVersion)"
-      - name: Build relperm.exe
+      - name: Build relperm.exe (windowed, for users)
         run: pyinstaller --onefile --windowed --name relperm --noconfirm --hidden-import openpyxl packaging/relperm_gui.py
-      - name: Smoke test - process the example report with the built exe
+      # A windowed exe reports errors in a message box that nobody can close on CI, so the
+      # smoke test runs the same program built as a console exe: errors land in the log.
+      - name: Build console twin for the smoke test
+        run: pyinstaller --onefile --console --name relperm-console --noconfirm --hidden-import openpyxl --distpath dist-console --workpath build-console packaging/relperm_gui.py
+      - name: Smoke test - process the example report
+        timeout-minutes: 10
         shell: pwsh
+        env:
+          MPLBACKEND: Agg
+          PYTHONIOENCODING: utf-8
         run: |
-          $env:MPLBACKEND = "Agg"
-          Start-Process -Wait -NoNewWindow -FilePath dist/relperm.exe -ArgumentList @(
-            "scal", "examples/scal_report_ru.xlsx", "-o", "smoke",
-            "--pc-lab-units", "MPa", "--pc-system", "oil-brine", "-f", "eclipse")
+          ./dist-console/relperm-console.exe scal examples/scal_report_ru.xlsx -o smoke --pc-lab-units MPa --pc-system oil-brine -f eclipse
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path smoke/scal_report.xlsx) -or !(Test-Path smoke/relperm_eclipse.inc)) {
-            Write-Error "relperm.exe did not produce the report"; exit 1
+            Write-Error "relperm did not produce the report"; exit 1
           }
       - uses: actions/upload-artifact@v4
         with:
