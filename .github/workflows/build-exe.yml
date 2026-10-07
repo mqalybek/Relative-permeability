@@ -1,0 +1,35 @@
+name: build-exe
+# Single-file Windows program: relperm.exe (no Python needed on the user's machine).
+# Download it from the run page: Actions -> build-exe -> Artifacts -> relperm-windows.
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install ".[scal]" pyinstaller
+      - name: Check tkinter (file dialogs)
+        run: python -c "import tkinter; print(tkinter.TkVersion)"
+      - name: Build relperm.exe
+        run: pyinstaller --onefile --windowed --name relperm --noconfirm --hidden-import openpyxl packaging/relperm_gui.py
+      - name: Smoke test - process the example report with the built exe
+        shell: pwsh
+        run: |
+          $env:MPLBACKEND = "Agg"
+          Start-Process -Wait -NoNewWindow -FilePath dist/relperm.exe -ArgumentList @(
+            "scal", "examples/scal_report_ru.xlsx", "-o", "smoke",
+            "--pc-lab-units", "MPa", "--pc-system", "oil-brine", "-f", "eclipse")
+          if (!(Test-Path smoke/scal_report.xlsx) -or !(Test-Path smoke/relperm_eclipse.inc)) {
+            Write-Error "relperm.exe did not produce the report"; exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relperm-windows
+          path: dist/relperm.exe
+          retention-days: 90
