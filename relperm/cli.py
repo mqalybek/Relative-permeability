@@ -269,7 +269,8 @@ def main(argv=None):
     t.add_argument("-o", "--output")
     t.set_defaults(func=cmd_template)
 
-    args = p.parse_args(argv)
+    argv = sys.argv[1:] if argv is None else list(argv)
+    args = p.parse_args(argv or ["app"])  # no arguments: open the editor
     args.func(args)
 
 
