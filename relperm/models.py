@@ -9,9 +9,9 @@ Saturation conventions (Eclipse-style names):
     sgcr   critical gas saturation (krg = 0 for Sg <= sgcr)
     sogcr  residual oil saturation to gas (Sorg)
 
-Capillary pressure (optional, zero when not set) uses the same normalization
-as the oil curves: Pcow on (Sw - swl) / (1 - swl - sowcr), Pcog on the liquid
-saturation (Sl - swl - sogcr) / (1 - sgl - swl - sogcr). See capillary.py.
+Capillary pressure (optional, zero when not set): Pcow is a primary drainage curve
+on (Sw - swl) / (1 - swl); Pcog on the liquid saturation
+(Sl - swl - sogcr) / (1 - sgl - swl - sogcr). See capillary.py.
 
 Endpoints:
 
@@ -199,7 +199,7 @@ class RockType:
         sw = np.asarray(sw, dtype=float)
         if self.pcow is None:
             return np.zeros_like(sw)
-        return self.pcow.pc(normalize(sw, self.swl, 1.0 - self.sowcr), self.pc_units)
+        return self.pcow.pc(normalize(sw, self.swl, 1.0), self.pc_units)
 
     def pc_og(self, sg):
         sl = 1.0 - np.asarray(sg, dtype=float)

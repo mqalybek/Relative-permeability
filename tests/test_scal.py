@@ -158,10 +158,11 @@ def test_sheet_names_map_to_samples():
 
 
 def _pc_csv(tmp_path, system_value, units, sigma_lab):
-    """Exact J = 0.15 Sn^-1.2 at reservoir sigma*cos = 30*cos30, written as lab Pc."""
+    """Exact J = 0.15 Swn^-1.2 at reservoir sigma*cos = 30*cos30, written as lab Pc.
+    The lowest Sw (Swirr) carries the highest Pc and is left out of the fit (Swn = 0)."""
     k, phi, swi, sorw = 100.0, 0.2, 0.2, 0.2
-    sw = np.linspace(0.25, 0.75, 8)
-    sn = (sw - swi) / (1 - swi - sorw)
+    sw = np.r_[swi, np.linspace(0.25, 0.95, 8)]
+    sn = np.clip((sw - swi) / (1 - swi), 0.02, 1)
     sigma_res = 30 * np.cos(np.radians(30))
     pc_res_pa = 0.15 * sn**-1.2 * sigma_res * 1e-3 / np.sqrt(k * 9.869233e-16 / phi)
     pc_lab = pc_res_pa * sigma_lab / sigma_res / {"psi": 6894.757, "kPa": 1e3}[units]
@@ -187,15 +188,16 @@ def test_pc_recovers_leverett_j(tmp_path, system, units, sigma_lab):
     assert rt.pcow.perm == pytest.approx(100) and rt.pcow.poro == pytest.approx(0.2)
     assert rt.pc_units == "bar"
     # rock type Pc at the measured saturations equals the reservoir Pc
-    sw = 0.2 + 0.3 * 0.6
+    sw = 0.2 + 0.3 * 0.8
     expected = 0.15 * 0.3**-1.2 * LeverettJ(1, 1, 100, 0.2, 30, 30).factor("bar")
     assert rt.pc_ow(sw) == pytest.approx(expected, rel=1e-3)
     assert "Pcow(bar)" in __import__("relperm").export([rt], "eclipse")
 
 
 def test_pc_without_perm_falls_back_to_brooks_corey(tmp_path):
-    sw = np.linspace(0.3, 0.7, 6)
-    pd.DataFrame({"sample": "S1", "Sw": sw, "Pc, bar": 0.1 * ((sw - 0.2) / 0.6) ** -0.5}) \
+    sw = np.r_[0.2, np.linspace(0.3, 0.9, 6)]
+    pd.DataFrame({"sample": "S1", "Sw": sw,
+                  "Pc, bar": 0.1 * np.clip((sw - 0.2) / 0.8, 0.02, 1) ** -0.5}) \
         .to_csv(tmp_path / "pc.csv", index=False)
     pd.DataFrame({"sample": "S1", "Sw": [0.2, 0.5, 0.8], "krw": [0, 0.1, 0.4],
                   "kro": [0.9, 0.2, 0]}).to_csv(tmp_path / "wo.csv", index=False)

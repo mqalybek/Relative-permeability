@@ -124,7 +124,8 @@ def cmd_scal(args):
         print(f"  {os.path.basename(path)} [{sheet}]: {kind}", file=sys.stderr)
     bins = [float(b) for b in args.perm_bins.split(",")] if args.perm_bins else []
     pc = PcOptions(lab_units=args.pc_lab_units, system=args.pc_system, ift_res=args.ift_res,
-                   theta_res=args.theta_res, units=args.pc_units, drho=args.drho)
+                   theta_res=args.theta_res, units=args.pc_units, drho=args.drho,
+                   j_form=args.j_form)
     res = build_rock_types(data, group_by=args.group_by, perm_bins=bins,
                            endpoints=args.endpoints, align_kro=not args.no_align_kro, pc=pc)
     for w in res.warnings:
@@ -149,17 +150,32 @@ def cmd_scal(args):
               f"theta={pc.theta_res:g} deg), units {pc.units}:")
         for rt in with_pc:
             m = rt.pcow
-            entry = float(rt.pc_ow(1 - rt.sowcr))
-            h = float(rt.height_above_fwl(1 - rt.sowcr, pc.drho))
+            entry = float(rt.pc_ow(1.0))
+            h = float(rt.height_above_fwl(1.0, pc.drho))
             n = sum(s.kind == "pc" for s in res.groups[rt.name])
             if m.model == "leverett":
-                desc = f"J = {m.a:.4g}*Sn^-{m.b:.4g}, k = {m.perm:.4g} mD, phi = {m.poro:.3g}"
+                desc = f"Leverett J ({m.form}), k = {m.perm:.4g} mD, phi = {m.poro:.3g}"
             else:
                 desc = f"Brooks-Corey pe = {m.pe:.4g}, lambda = {m.lam:.4g}"
-            print(f"  {rt.name:<14}{n:>2} samples  {desc}, Pcmax = {m.pcmax:.4g}; "
+            pcmax = "-" if m.pcmax is None else f"{m.pcmax:.4g}"
+            print(f"  {rt.name:<14}{n:>2} samples  {desc}, Pcmax = {pcmax}; "
                   f"entry {entry:.4g} -> {h:.1f} m above FWL")
+            for form, f in res.pc_fits.get(rt.name, {}).items():
+                expr = (f"{f['a']:.4g}*exp(-{f['b']:.4g}*Swn)" if form == "exp"
+                        else f"{f['a']:.4g}*Swn^-{f['b']:.4g}")
+                mark = "  <- used" if form == getattr(m, "form", None) else ""
+                print(f"      J = {expr:<26} rmse(Swn) = {f['rmse_swn']:.3f}, "
+                      f"{f['used']} points{mark}")
 
     written = write_report(res, args.output, args.points, pc)
+    dep = res.dependencies
+    if dep.get("fits"):
+        print(f"\nDependencies ({len(dep['properties'])} samples):")
+        for f in dep["fits"]:
+            print(f"  {f['formula']:<40} R2 = {f['r2']:.2f}  n = {f['n']}")
+    for a in dep.get("anomalies", []):
+        print(f"anomaly [{a['sample']}] {a['property']} = {a['value']}: {a['reason']}",
+              file=sys.stderr)
     if args.export:
         path = os.path.join(args.output, f"relperm_{args.export}.inc")
         with open(path, "w", encoding="utf-8") as f:
@@ -189,7 +205,8 @@ def main(argv=None):
     sc = sub.add_parser("scal", help="build rock types from SCAL lab data (CSV / Excel)")
     sc.add_argument("files", nargs="+", help="CSV / XLSX files; all sheets are read")
     sc.add_argument("-o", "--output", default="scal_out", help="output directory")
-    sc.add_argument("--group-by", choices=["auto", "rock_type", "perm", "none"], default="auto")
+    sc.add_argument("--group-by", choices=["auto", "rock_type", "horizon", "well", "perm", "none"],
+                    default="auto")
     sc.add_argument("--perm-bins", help="permeability class edges in mD, e.g. 10,100")
     sc.add_argument("--endpoints", choices=["mean", "median"], default="mean")
     sc.add_argument("--no-align-kro", action="store_true",
@@ -205,6 +222,8 @@ def main(argv=None):
                     help="reservoir contact angle, degrees (default 30)")
     sc.add_argument("--pc-units", choices=["bar", "psi", "kPa", "atm"], default="bar",
                     help="Pc units of the output tables")
+    sc.add_argument("--j-form", choices=["auto", "power", "exp"], default="auto",
+                    help="Leverett J: a*Swn^-b, a*exp(-b*Swn) or the better fit (default)")
     sc.add_argument("--drho", type=float, default=250.0,
                     help="oil-water density difference for heights above FWL, kg/m3")
     sc.add_argument("-n", "--points", type=int, default=20)

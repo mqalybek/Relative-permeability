@@ -1,12 +1,15 @@
 """Capillary pressure models: Brooks-Corey and Leverett J-function.
 
-Both are written in terms of a normalized wetting saturation Sn in [0, 1]:
+Both are written in terms of a normalized wetting saturation Sn in [0, 1]
+(for oil-water drainage Sn = (Sw - Swl) / (1 - Swl)):
 
-    Brooks-Corey:  Pc = pe * Sn**(-1/lam)
-    Leverett J:    J  = a * Sn**(-b),   Pc = J * ift * cos(theta) / sqrt(k / phi)
+    Brooks-Corey:      Pc = pe * Sn**(-1/lam)
+    Leverett J power:  J  = a * Sn**(-b)
+    Leverett J exp:    J  = a * exp(-b * Sn)
+    with               Pc = J * ift * cos(theta) / sqrt(k / phi)
 
-Pc grows without bound as Sn -> 0, so it is capped at ``pcmax``. Without a cap,
-Sn is floored at SN_FLOOR. At Sn = 1 the curve equals the entry (threshold)
+Power laws grow without bound as Sn -> 0, so they are capped at ``pcmax``; without
+a cap, Sn is floored at SN_FLOOR. At Sn = 1 the curve equals the entry (threshold)
 pressure, which places the contact above the free water level.
 """
 
@@ -64,7 +67,8 @@ class BrooksCorey:
 
 @dataclass(frozen=True)
 class LeverettJ:
-    """J = a * Sn**(-b), scaled with permeability (mD), porosity and IFT (mN/m)."""
+    """J = a * Sn**(-b) (form "power") or a * exp(-b * Sn) (form "exp"), scaled with
+    permeability (mD), porosity and IFT (mN/m)."""
 
     a: float
     b: float
@@ -73,11 +77,22 @@ class LeverettJ:
     ift: float = 25.0
     theta: float = 0.0  # contact angle, degrees
     pcmax: Optional[float] = None  # in the rock type's pc_units
+    form: str = "power"
     model = "leverett"
 
     def __post_init__(self):
         if self.a < 0 or self.b <= 0 or self.perm <= 0 or not 0 < self.poro < 1 or self.ift < 0:
             raise ValueError(f"Invalid Leverett J parameters: {self}")
+        if self.form not in ("power", "exp"):
+            raise ValueError(f"Leverett J form must be 'power' or 'exp', got {self.form!r}")
+
+    def j(self, sn):
+        """Dimensionless J at normalized saturation sn (uncapped for the power form at 0)."""
+        sn = np.clip(np.asarray(sn, dtype=float), 0.0, 1.0)
+        if self.form == "exp":
+            return self.a * np.exp(-self.b * sn)
+        with np.errstate(divide="ignore"):
+            return self.a * sn ** (-self.b)
 
     def factor(self, units: str) -> float:
         """Pc / J in the requested units."""
@@ -86,6 +101,9 @@ class LeverettJ:
         return sigma / math.sqrt(self.perm * MILLIDARCY_M2 / self.poro) * PRESSURE_UNITS[units]
 
     def pc(self, sn, units: str = "bar"):
+        if self.form == "exp":
+            pc = self.j(sn) * self.factor(units)
+            return pc if self.pcmax is None else np.minimum(pc, self.pcmax)
         return _power_law(sn, self.a * self.factor(units), self.b, self.pcmax)
 
 

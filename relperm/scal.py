@@ -33,15 +33,27 @@ from .models import RockType, normalize
 ALIASES = {
     "sample": ["sample", "sample id", "sampleid", "sample no", "plug", "plug id", "core", "core id",
                "образец", "№ образца", "номер образца", "№ обр", "обр", "проба", "шифр образца"],
+    "well": ["well", "well no", "well name", "скв", "№ скв", "скважина", "№ скважины"],
     "rock_type": ["rock type", "rocktype", "rt", "satnum", "facies", "litho", "lithotype",
                   "тип породы", "тип", "литотип", "фация", "петротип"],
-    "perm": ["perm", "permeability", "k", "kabs", "k abs", "ka", "kair", "kg", "kl",
-             "проницаемость", "кпр", "кпр абс", "кабс", "кпр газ"],
-    "poro": ["poro", "porosity", "phi", "пористость", "кп", "кпо"],
+    "horizon": ["horizon", "zone", "formation", "горизонт", "пласт", "объект"],
+    "depth": ["depth", "md", "глубина", "интервал", "глубина отбора"],
+    "perm": ["perm", "permeability", "k", "kabs", "k abs", "ka", "kair", "kg", "kl", "kgas",
+             "проницаемость", "кпр", "кпр абс", "кабс", "кпр газ", "кпр по газу",
+             "проницаемость для газа", "проницаемость по газу", "абсолютная проницаемость"],
+    "perm_w": ["kw", "k water", "kbrine", "perm water", "проницаемость по пластовой воде",
+               "проницаемость по воде", "кпр по воде", "кпрв"],
+    "poro": ["poro", "porosity", "phi", "пористость", "кп", "кпо", "коэффициент пористости"],
     "swi": ["swi", "swirr", "swc", "sw irr", "кво", "sво", "остаточная водонасыщенность"],
+    "sor": ["sor", "sorw", "кно", "sно", "остаточная нефтенасыщенность"],
+    "kdisp": ["kdisp", "ed", "displacement efficiency", "квыт", "коэффициент вытеснения"],
+    "amott": ["amott", "amott index", "амотт", "индекс амотта", "показатель смачиваемости",
+              "показатель смачиваемости амотта"],
     "sw": ["sw", "s w", "water saturation", "кв", "sв", "водонасыщенность"],
-    "krw": ["krw", "kr w", "krwater", "офп воды", "офпв", "кфпв", "кпрв отн", "фп воды"],
-    "kro": ["kro", "krow", "kr o", "kroil", "офп нефти", "офпн", "кфпн", "кпрн отн", "фп нефти"],
+    "krw": ["krw", "kr w", "krwater", "офп воды", "офпв", "кфпв", "кпрв отн", "фп воды",
+            "котн воды", "кот воды"],
+    "kro": ["kro", "krow", "kr o", "kroil", "офп нефти", "офпн", "кфпн", "кпрн отн", "фп нефти",
+            "котн нефти", "кот нефти"],
     "sg": ["sg", "s g", "gas saturation", "кг", "sг", "газонасыщенность"],
     "krg": ["krg", "kr g", "krgas", "офп газа", "офпг", "кфпг", "фп газа"],
     "krog": ["krog", "kro g", "офп нефти в системе газ-нефть", "офпнг"],
@@ -51,9 +63,14 @@ ALIASES = {
             "ртутенасыщенность", "sрт", "кнр"],
     "system": ["system", "fluid system", "fluids", "method", "система", "флюиды", "метод"],
 }
-TEXT_COLUMNS = ("sample", "rock_type", "system")
-META_COLUMNS = ("perm", "poro", "rock_type", "swi")
-FRACTION_COLUMNS = ("sw", "sg", "swi", "poro", "krw", "kro", "krg", "krog", "shg")
+TEXT_COLUMNS = ("sample", "well", "rock_type", "horizon", "system")
+# sample properties copied onto the curve tables of the same sample
+META_COLUMNS = ("perm", "perm_w", "poro", "rock_type", "swi", "well", "horizon", "depth")
+FRACTION_COLUMNS = ("sw", "sg", "swi", "sor", "kdisp", "poro", "krw", "kro", "krg", "krog", "shg")
+# words that may follow a column name without changing it: units, "доли ед." and the like
+_UNIT_WORDS = {"доли", "дол", "ед", "д", "мд", "md", "мкм2", "мпа", "mpa", "кпа", "kpa", "атм",
+               "atm", "бар", "bar", "psi", "па", "pa", "см", "м", "мл", "кг", "fraction", "frac",
+               "frac.", "%", "v/v", "дол.ед", "отн", "ед.", "д.ед", "д.ед."}
 
 # lab pressure units -> bar, matched against the units part of the Pc header
 PC_UNITS_TO_BAR = [
@@ -77,6 +94,8 @@ _SYSTEM_KEYWORDS = [  # checked in order
 
 # Cyrillic letters that look like Latin ones, so "Kв" (Latin K) matches "кв".
 _LOOKALIKE = str.maketrans("кораснхе", "kopacnxe")
+# Sample IDs mix them too ("011004036РT03H" with Cyrillic Р): compare in Latin capitals.
+_ID_LOOKALIKE = str.maketrans("АВЕКМНОРСТХаеорсух", "ABEKMHOPCTXaeopcyx")
 
 
 def _norm(name) -> str:
@@ -87,6 +106,33 @@ def _norm(name) -> str:
 
 
 ALIAS_INDEX = {_norm(a): canon for canon, names in ALIASES.items() for a in names}
+ALIAS_INDEX.pop("", None)
+
+
+def _unit_like(word: str) -> bool:
+    """Short unit-ish token ("мД", "%", "*10-3", "мкм2"), not a sample ID like "011004059РT01H"."""
+    w = word.strip().lower()
+    return w in _UNIT_WORDS or (len(w) <= 6 and bool(re.search(r"[\d%*/.]", w)))
+
+
+def _match_header(text) -> tuple[str | None, str]:
+    """Canonical column name and the leftover text (units) of a header cell.
+
+    Trailing unit words are ignored: "Кпр. мД", "Пористость. доли ед.", "Pc_Mpa".
+    """
+    low = str(text).strip().lower()
+    if not low or low == "nan":
+        return None, ""
+    m = re.search(r"[\(\[,]", low)
+    base, units = (low[:m.start()], low[m.start():]) if m else (low, "")
+    words = [w for w in re.split(r"[\s_]+", base) if w]
+    for n in range(len(words), 0, -1):
+        if n < len(words) and not all(_unit_like(w) for w in words[n:]):
+            break
+        canon = ALIAS_INDEX.get(_norm(" ".join(words[:n])))
+        if canon:
+            return canon, " ".join(words[n:]) + " " + units
+    return None, ""
 
 
 def _pandas():
@@ -108,13 +154,10 @@ def _csv_separator(path: str) -> str:
 
 
 def _pc_unit_factor(header) -> float | None:
-    """bar per lab unit from a Pc header like "Pc, psi" or "Рк (МПа)"; None if absent."""
-    parts = re.split(r"[\(\[,]", str(header).lower(), maxsplit=1)
-    if len(parts) < 2:
-        return None
-    units = parts[1]
+    """bar per lab unit from a Pc header like "Pc, psi", "Рк (МПа)" or "Pc_Mpa"; None if absent."""
+    _, units = _match_header(header)
     for pattern, factor in PC_UNITS_TO_BAR:
-        if re.search(pattern, units):
+        if re.search(pattern, units.strip()):
             return factor
     return None
 
@@ -138,18 +181,53 @@ def _strip_system_words(name: str) -> str:
     return re.sub(r"[\s_\-]+", " ", out).strip() or str(name)
 
 
-def _find_header(raw) -> int | None:
-    for i in range(min(25, len(raw))):
-        hits = {ALIAS_INDEX.get(_norm(c)) for c in raw.iloc[i] if str(c).strip()} - {None}
-        if len(hits) >= 2:
-            return i
-    return None
+def _header_columns(row) -> dict:
+    """{column index: (canonical name, header text)} for one row; first use of a name wins."""
+    cols, seen = {}, set()
+    for j, c in enumerate(row):
+        canon, _ = _match_header(c)
+        if canon and canon not in seen:
+            cols[j] = (canon, str(c))
+            seen.add(canon)
+    return cols
+
+
+def _find_tables(raw) -> list[dict]:
+    """Tables on a sheet: header rows with at least two known columns.
+
+    A later header row that reuses columns of an earlier table ends that table (two tables
+    stacked on one sheet). Columns it does not redefine (sample, well, ...) are inherited, so
+    curves below a summary table keep the sample IDs written in the summary's column.
+    """
+    tables = []
+    for i in range(len(raw)):
+        row = raw.iloc[i]
+        cols = _header_columns(row)
+        numbers = int(_to_number(row.dropna().astype(str)).notna().sum())
+        if len(cols) < 2 or numbers > len(cols):  # data rows are mostly numbers
+            continue
+        inherited = {}
+        for t in tables:
+            if t["end"] is None and set(t["cols"]) & set(cols):
+                t["end"] = i
+                inherited.update({j: v for j, v in t["cols"].items()
+                                  if j not in cols and v[0] in ("sample", "well", "horizon",
+                                                                 "rock_type")})
+        tables.append({"row": i, "cols": {**inherited, **cols}, "end": None})
+    for t in tables:
+        if t["end"] is None:
+            t["end"] = len(raw)
+    return tables
 
 
 def _sample_id(v) -> str:
+    """Clean sample ID: "обр. 011004036РT03H, Кп=15,2%" -> "011004036PT03H"."""
     if isinstance(v, float) and v.is_integer():
         v = int(v)
-    return str(v).strip()
+    s = str(v).strip()
+    s = re.sub(r"(?i)^(обр(азец)?|sample|plug)[\s.,:;№#]*", "", s)
+    s = next((part.strip() for part in s.split(",") if part.strip()), s)
+    return s.translate(_ID_LOOKALIKE).upper() if re.search(r"\d", s) else s
 
 
 def _to_number(series):
@@ -158,35 +236,44 @@ def _to_number(series):
     return pd.to_numeric(s, errors="coerce")
 
 
-def _standardize(raw, source: str):
-    """Raw sheet (no header) -> table with canonical columns, or None."""
+_WELL_SEPARATOR = re.compile(r"(?i)^\s*(скважина|скв\.?|well)\s*№?\s*([\w\-/]+)\s*$")
+
+
+def _standardize(raw, table: dict, source: str):
+    """One table of a raw sheet -> (DataFrame with canonical columns, has a sample column)."""
     pd = _pandas()
-    raw = raw.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
-    hdr = _find_header(raw)
-    if hdr is None:
-        return None
-    columns, keep, pc_factor = [], [], None
-    for j, c in enumerate(raw.iloc[hdr]):
-        canon = ALIAS_INDEX.get(_norm(c))
-        if canon and canon not in columns:
-            columns.append(canon)
-            keep.append(j)
-            if canon == "pc":
-                pc_factor = _pc_unit_factor(c)
-    df = raw.iloc[hdr + 1:, keep].copy()
-    df.columns = columns
-    for c in columns:
+    keep = sorted(table["cols"])
+    df = raw.iloc[table["row"] + 1:table["end"], keep].copy()
+    df.columns = [table["cols"][j][0] for j in keep]
+    pc_factor = None
+    for j in keep:
+        canon, header = table["cols"][j]
+        if canon == "pc" and pc_factor is None:
+            pc_factor = _pc_unit_factor(header)
+    has_sample = "sample" in df
+    for c in df.columns:
         if c in TEXT_COLUMNS:
-            df[c] = df[c].where(df[c].notna() & (df[c].astype(str).str.strip() != ""))
+            v = df[c].where(df[c].notna())
+            v = v.map(lambda x: str(x).strip() if x is not None and str(x) != "nan" else None)
+            df[c] = v.where(~v.isin(["", "-", "—", "nan", None]))
         else:
             df[c] = _to_number(df[c])
-    # merged cells / IDs written once per block
-    for c in ("sample", "rock_type", "perm", "poro", "swi", "system"):
-        if c in df and ("sw" in df or "sg" in df or "shg" in df):
-            df[c] = df[c].ffill()
+    # "Скважина №31" rows inside a table: set the well for the rows below, then drop them
+    if has_sample:
+        sep = df["sample"].astype(str).str.extract(_WELL_SEPARATOR)[1]
+        if sep.notna().any():
+            df["well"] = (df["well"].fillna(sep) if "well" in df else sep).ffill()
+            df = df[sep.isna()]
+    if "well" in df:
+        df["well"] = df["well"].ffill().map(_sample_id, na_action="ignore")
+    curves = "sw" in df or "sg" in df or "shg" in df
+    if curves:  # merged cells / IDs written once per block
+        for c in ("sample", "rock_type", "horizon", "perm", "perm_w", "poro", "swi", "system"):
+            if c in df:
+                df[c] = df[c].ffill()
     if ("sg" in df or "krg" in df) and "krog" not in df and "kro" in df:
         df = df.rename(columns={"kro": "krog"})
-    if "sample" not in df:
+    if not has_sample:
         df["sample"] = _strip_system_words(source) if "pc" in df else source
     df["sample"] = df["sample"].map(_sample_id, na_action="ignore")
     for c in FRACTION_COLUMNS:  # percent -> fraction
@@ -203,10 +290,11 @@ def _standardize(raw, source: str):
             df["pc_system"] = system if fallback is None else system.fillna(fallback)
         else:
             df["pc_system"] = fallback
-    return pd.DataFrame(df)
+    df["source"] = source
+    return pd.DataFrame(df), has_sample
 
 
-def _kinds(df) -> list[str]:
+def _kinds(df, has_sample: bool) -> list[str]:
     kinds = []
     if "sw" in df and ("krw" in df or "kro" in df):
         kinds.append("wo")
@@ -214,7 +302,7 @@ def _kinds(df) -> list[str]:
         kinds.append("go")
     if "sw" in df and "pc" in df:
         kinds.append("pc")
-    if not kinds and any(c in df for c in META_COLUMNS):
+    if not kinds and has_sample:
         kinds.append("meta")
     return kinds
 
@@ -225,10 +313,30 @@ class ScalData:
     gas_oil: object  # pandas DataFrame: sample, Sg, krg, krog (+ meta)
     sources: list = field(default_factory=list)
     capillary: object = None  # pandas DataFrame: sample, Sw, pc, pc_bar_factor, pc_system (+ meta)
+    samples: object = None  # pandas DataFrame indexed by sample: every property found
+    discrepancies: list = field(default_factory=list)  # same property, different sheets
+
+
+def _discrepancies(meta, tolerance=0.1) -> list[dict]:
+    """Numeric properties of one sample that differ between sheets by more than tolerance."""
+    out = []
+    numeric = [c for c in meta.columns if c not in TEXT_COLUMNS + ("source",)
+               and meta[c].dtype.kind in "fi"]
+    for sample, d in meta.groupby("sample"):
+        for c in numeric:
+            v = d[[c, "source"]].dropna()
+            if len(v) < 2:
+                continue
+            lo, hi = v[c].min(), v[c].max()
+            if lo > 0 and hi / lo - 1 > tolerance:
+                out.append({"sample": sample, "property": c,
+                            "values": "; ".join(f"{r.source}: {r[c]:g}" for _, r in v.iterrows())})
+    return out
 
 
 def read_scal(*paths: str) -> ScalData:
-    """Read SCAL tables from CSV/Excel files (all sheets) and merge sample metadata."""
+    """Read SCAL tables from CSV/Excel files (all sheets and all tables on a sheet) and merge
+    sample properties (k, porosity, Swi, Sor, ...) found anywhere by sample ID."""
     pd = _pandas()
     parts = {"wo": [], "go": [], "pc": [], "meta": []}
     sources = []
@@ -240,11 +348,22 @@ def read_scal(*paths: str) -> ScalData:
             sheets = {stem: pd.read_csv(path, header=None, sep=_csv_separator(path),
                                         dtype=str, encoding="utf-8-sig")}
         for name, raw in sheets.items():
-            df = _standardize(raw, str(name))
-            kinds = _kinds(df) if df is not None else []
-            sources.append((path, str(name), "+".join(kinds) or "skipped"))
-            for kind in kinds:
-                parts[kind].append(df)
+            raw = raw.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
+            raw.columns = range(raw.shape[1])
+            tables = _find_tables(raw)
+            if not tables:
+                sources.append((path, str(name), "skipped"))
+            for k, table in enumerate(tables):
+                label = str(name) if len(tables) == 1 else f"{name} #{k + 1}"
+                df, has_sample = _standardize(raw, table, str(name))
+                if len(tables) > 1 and not has_sample:
+                    # side calculations next to the data (no sample IDs): not lab data
+                    sources.append((path, label, "skipped (no sample column)"))
+                    continue
+                kinds = _kinds(df, has_sample)
+                sources.append((path, label, "+".join(kinds) or "skipped"))
+                for kind in kinds:
+                    parts[kind].append(df)
 
     def cat(frames, sat):
         if not frames:
@@ -253,17 +372,20 @@ def read_scal(*paths: str) -> ScalData:
 
     wo, go = cat(parts["wo"], "sw"), cat(parts["go"], "sg")
     pc = cat(parts["pc"], "sw").dropna(subset=["pc"]) if parts["pc"] else cat([], "sw")
+    samples, discrepancies = None, []
     if parts["meta"]:
-        meta = (pd.concat(parts["meta"], ignore_index=True).dropna(subset=["sample"])
-                .groupby("sample").first())
+        meta = pd.concat(parts["meta"], ignore_index=True).dropna(subset=["sample"])
+        meta = meta[meta.drop(columns=["sample", "source"], errors="ignore").notna().any(axis=1)]
+        discrepancies = _discrepancies(meta)
+        samples = meta.drop(columns=["source"]).groupby("sample").first()
         for df in (wo, go, pc):
             for c in META_COLUMNS:
-                if c in meta:
-                    fill = df["sample"].map(meta[c])
+                if c in samples:
+                    fill = df["sample"].map(samples[c])
                     df[c] = df[c].fillna(fill) if c in df else fill
     if wo.empty and go.empty and pc.empty:
         raise ValueError("No SCAL tables found (need Sw + krw/kro, Sg + krg/krog or Sw/SHg + Pc)")
-    return ScalData(wo, go, sources, pc)
+    return ScalData(wo, go, sources, pc, samples, discrepancies)
 
 
 # ------------------------------------------------------------------- analysis
@@ -388,6 +510,7 @@ class PcOptions:
     ift_res: float = 30.0  # reservoir oil-water interfacial tension, mN/m
     theta_res: float = 30.0  # reservoir contact angle, degrees
     units: str = "bar"  # Pc units of the rock types
+    j_form: str = "auto"  # Leverett J form: "power", "exp" or "auto" (better fit)
     drho: float = 250.0  # oil-water density difference for QC heights, kg/m3
 
     @property
@@ -396,8 +519,33 @@ class PcOptions:
         return self.ift_res * math.cos(math.radians(self.theta_res))
 
 
-def analyze_capillary(d, swl: float, sorw: float, opts: PcOptions) -> Sample:
-    """Lab Pc -> reservoir Pc -> Leverett J against the sample's normalized Sw."""
+def fit_j(sn, j, form: str) -> dict:
+    """Fit J = a * Swn**(-b) ("power") or a * exp(-b * Swn) ("exp").
+
+    In the lab Pc is set and Sw is measured, and the model has to reproduce the saturation
+    distribution, so the regression minimizes the error in saturation: Swn (or ln Swn for
+    the power form) against ln J. Uses points with 0 < Swn < 1 and J > 0. Returns a, b,
+    rmse of Swn and the number of points used.
+    """
+    sn, j = np.asarray(sn, float), np.asarray(j, float)
+    m = np.isfinite(sn) & np.isfinite(j) & (sn > 0) & (sn < 1) & (j > 0)
+    if m.sum() < 2:
+        raise ValueError("fewer than 2 Pc points with 0 < Swn < 1")
+    x, ln_j = sn[m], np.log(j[m])
+    target = np.log(x) if form == "power" else x
+    slope, intercept = np.polyfit(ln_j, target, 1)
+    if slope >= 0:
+        raise ValueError("Swn does not decrease as Pc grows; not a drainage curve")
+    b = -1.0 / slope
+    a = float(np.exp(intercept * b))
+    pred = np.exp(-(ln_j - math.log(a)) / b) if form == "power" else (math.log(a) - ln_j) / b
+    rmse = float(np.sqrt(np.mean((np.clip(pred, 0, 1) - x) ** 2)))
+    return {"form": form, "a": a, "b": float(b), "rmse_swn": rmse, "used": int(m.sum())}
+
+
+def analyze_capillary(d, opts: PcOptions) -> Sample:
+    """Lab Pc -> reservoir Pc -> Leverett J against normalized water saturation
+    Swn = (Sw - Swirr) / (1 - Swirr), Swirr = lowest measured Sw (at the highest Pc)."""
     d = d.sort_values("sw").copy()
     s = Sample(_sample_id(d["sample"].iloc[0]), "pc", perm=_first(d, "perm"),
                poro=_first(d, "poro"), points=len(d), raw=d)
@@ -417,58 +565,62 @@ def analyze_capillary(d, swl: float, sorw: float, opts: PcOptions) -> Sample:
     d["pc_lab_bar"] = d["pc"].astype(float) * factor
     d["pc_res_bar"] = d["pc_lab_bar"] * opts.sigma_res / sigma_lab
 
-    if not math.isnan(_first(d, "swi")):
-        swl = _first(d, "swi")
-    if math.isnan(swl):
-        swl = float(d["sw"].min())
-        s.notes.append("no Swi for Pc sample; Swl = lowest measured Sw")
-    sorw = 0.0 if math.isnan(sorw) else sorw
-    d["sn"] = normalize(d["sw"].to_numpy(float), swl, 1.0 - sorw)
-    s.endpoints = {"swl": swl, "sorw": sorw, "system": system,
+    swirr = float(d["sw"].min())
+    d["sn"] = normalize(d["sw"].to_numpy(float), swirr, 1.0)
+    s.endpoints = {"swl": swirr, "swirr": swirr, "system": system,
+                   "pc_lab_max_bar": float(d["pc_lab_bar"].max()),
                    "pc_res_max": float(d["pc_res_bar"].max())}
     if s.perm > 0 and 0 < s.poro < 1:
         sqrt_k_phi = math.sqrt(s.perm * MILLIDARCY_M2 / s.poro)
         d["J"] = d["pc_res_bar"] * 1e5 * sqrt_k_phi / (opts.sigma_res * 1e-3)
         s.normalized["J"] = (d["sn"].to_numpy(float), d["J"].to_numpy(float))
-        try:
-            fit = fit_corey(d["sn"], d["J"], 0.0, 1.0)
-            s.exponents.update(J_a=fit.kr_max, J_b=-fit.n)
-        except ValueError:
-            s.notes.append("too few Pc points inside (Swl, 1 - Sorw) to fit")
+        for form in ("power", "exp"):
+            try:
+                f = fit_j(d["sn"], d["J"], form)
+                s.exponents.update({f"J_a_{form}": f["a"], f"J_b_{form}": f["b"]})
+                s.rmse[f"J_{form}"] = f["rmse_swn"]
+            except ValueError:
+                s.notes.append("too few Pc points inside (Swirr, 1) to fit J")
+                break
     else:
         s.notes.append("no permeability/porosity: Pc not converted to J")
     s.normalized["pc"] = (d["sn"].to_numpy(float), d["pc_res_bar"].to_numpy(float))
-    used = int(((d["sn"] > 0) & (d["sn"] < 1)).sum())
-    if used < len(d):
-        s.notes.append(f"{len(d) - used} Pc points outside (Swl, 1 - Sorw) not used in the fit")
     s.raw = d
     return s
 
 
 def fit_group_capillary(members, opts: PcOptions, how: str = "mean"):
-    """Pooled Leverett J (or Brooks-Corey when k/phi are missing) for one rock type."""
+    """Pooled Leverett J (or Brooks-Corey when k/phi are missing) for one rock type.
+
+    Returns (model, fits): fits holds both J forms for the report; opts.j_form picks one,
+    "auto" takes the smaller saturation error.
+    """
     pcs = [s for s in members if s.kind == "pc"]
     with_j = [s for s in pcs if "J" in s.normalized]
+    sig = lambda x: float(f"{x:.5g}")  # noqa: E731
     if with_j:
         sn = np.concatenate([s.normalized["J"][0] for s in with_j])
         j = np.concatenate([s.normalized["J"][1] for s in with_j])
-        fit = fit_corey(sn, j, 0.0, 1.0)
+        fits = {form: fit_j(sn, j, form) for form in ("power", "exp")}
+        form = opts.j_form if opts.j_form != "auto" else min(fits, key=lambda f: fits[f]["rmse_swn"])
+        f = fits[form]
         perm = float(np.exp(np.mean(np.log([s.perm for s in with_j]))))  # geometric mean
         poro = _aggregate([s.poro for s in with_j], how)
-        sig = lambda x: float(f"{x:.5g}")  # noqa: E731
-        model = LeverettJ(a=sig(fit.kr_max), b=sig(-fit.n), perm=sig(perm), poro=sig(poro),
-                          ift=opts.ift_res, theta=opts.theta_res)
-        j_max = float(np.nanmax(j[(sn > 0)])) if np.any(sn > 0) else fit.kr_max
-        pcmax = max(j_max, fit.kr_max) * model.factor(opts.units)
-        return dataclasses.replace(model, pcmax=sig(pcmax))
+        model = LeverettJ(a=sig(f["a"]), b=sig(f["b"]), perm=sig(perm), poro=sig(poro),
+                          ift=opts.ift_res, theta=opts.theta_res, form=form)
+        if form == "power":  # cap the singularity at the highest measured J
+            j_max = float(np.nanmax(j[sn > 0])) if np.any(sn > 0) else f["a"]
+            model = dataclasses.replace(model, pcmax=sig(max(j_max, f["a"])
+                                                        * model.factor(opts.units)))
+        return model, fits
     if pcs:
         sn = np.concatenate([s.normalized["pc"][0] for s in pcs])
         pc_bar = np.concatenate([s.normalized["pc"][1] for s in pcs])
         pc = pc_bar * 1e5 * PRESSURE_UNITS[opts.units]
         fit = fit_brooks_corey(sn, pc, 0.0, 1.0)
-        return BrooksCorey(pe=float(f"{fit.pe:.5g}"), lam=float(f"{fit.lam:.5g}"),
-                           pcmax=float(f"{max(float(np.nanmax(pc)), fit.pe):.5g}"))
-    return None
+        return BrooksCorey(pe=sig(fit.pe), lam=sig(fit.lam),
+                           pcmax=sig(max(float(np.nanmax(pc)), fit.pe))), {}
+    return None, {}
 
 
 def _perm_label(k, bins) -> str:
@@ -490,6 +642,9 @@ class ScalResult:
     groups: dict  # name -> list of Sample
     correlations: list
     warnings: list
+    pc_fits: dict = field(default_factory=dict)  # rock type -> {"power": {...}, "exp": {...}}
+    data: object = None  # the ScalData the result was built from
+    dependencies: dict = field(default_factory=dict)  # filled by write_report
 
 
 def _aggregate(values, how):
@@ -539,6 +694,12 @@ def build_rock_types(data: ScalData, group_by: str = "auto", perm_bins=(),
             return _sample_id(col.dropna().iloc[0])
         if group_by == "perm":
             return _perm_label(s.perm, perm_bins)
+        if group_by in ("horizon", "well"):
+            col = s.raw.get(group_by)
+            if col is None or col.isna().all():
+                return "unassigned"
+            value = str(col.dropna().iloc[0])
+            return f"well {value}" if group_by == "well" else value
         return "RT1"
 
     for s in samples:
@@ -558,25 +719,16 @@ def build_rock_types(data: ScalData, group_by: str = "auto", perm_bins=(),
         go_samples.append(s)
     samples += go_samples
 
-    sorw_by_sample = {s.sample: s.endpoints["sorw"] for s in samples if s.kind == "wo"}
-    wo_group_sorw = {}
-    for s in samples:
-        if s.kind == "wo":
-            wo_group_sorw.setdefault(s.group, []).append(s.endpoints["sorw"])
     for _, d in (cap.groupby("sample", sort=False) if len(cap) else []):
-        sid = _sample_id(d["sample"].iloc[0])
-        grp = group_of(Sample(sid, "pc", perm=_first(d, "perm"), raw=d))
-        swl = swl_by_sample.get(sid, _aggregate(wo_group_swl.get(grp, []), endpoints))
-        sorw = sorw_by_sample.get(sid, _aggregate(wo_group_sorw.get(grp, []), endpoints))
-        s = analyze_capillary(d, swl, sorw, pc)
-        s.group = grp
+        s = analyze_capillary(d, pc)
+        s.group = group_of(s)
         samples.append(s)
 
     groups: dict = {}
     for s in samples:
         groups.setdefault(s.group, []).append(s)
 
-    rock_types, warnings = [], []
+    rock_types, warnings, pc_fits = [], [], {}
     for name, members in groups.items():
         w = [s for s in members if s.kind == "wo"]
         g = [s for s in members if s.kind == "go"]
@@ -605,7 +757,7 @@ def build_rock_types(data: ScalData, group_by: str = "auto", perm_bins=(),
             warnings.append(f"{name}: no gas-oil data, gas-oil curves are defaults")
         if c:
             try:
-                params["pcow"] = fit_group_capillary(members, pc, endpoints)
+                params["pcow"], pc_fits[name] = fit_group_capillary(members, pc, endpoints)
                 params["pc_units"] = pc.units
             except ValueError as e:
                 warnings.append(f"{name}: capillary pressure not fitted ({e})")
@@ -620,7 +772,8 @@ def build_rock_types(data: ScalData, group_by: str = "auto", perm_bins=(),
         rock_types.append(rt)
         warnings += [f"{name}: {x}" for x in rt.warnings()]
 
-    return ScalResult(samples, rock_types, groups, endpoint_correlations(samples), warnings)
+    return ScalResult(samples, rock_types, groups, endpoint_correlations(samples), warnings,
+                      pc_fits, data)
 
 
 def endpoint_correlations(samples) -> list[dict]:
@@ -706,10 +859,14 @@ def write_report(result: ScalResult, out_dir: str, points: int = 20,
             sw, pcow = denormalized_pc_points(pcs, rt)
             pd.DataFrame({"Sw": sw, "Pcow": pcow}).to_csv(path(f"lab_{safe}_pc.csv"), index=False,
                                                           float_format="%.5g")
-            _plot_capillary(plt, name, pcs, rt, pc or PcOptions(), path(f"qc_pc_{safe}.png"))
+            _plot_capillary(plt, name, pcs, rt, pc or PcOptions(), path(f"qc_pc_{safe}.png"),
+                            result.pc_fits.get(name))
 
     if any(s.perm > 0 for s in result.samples):
         _plot_correlations(plt, result, path("endpoints_vs_perm.png"))
+    from .dependencies import write_dependencies
+
+    written += write_dependencies(result, out_dir, plt)
     return written
 
 
@@ -785,13 +942,13 @@ def _plot_correlations(plt, result, filename):
 
 
 def denormalized_pc_points(pcs, rt: RockType):
-    """Lab Pc points moved onto the rock type: Sw from the sample's Sn and the rock type's
-    endpoints, Pc from the sample's J and the rock type's k/phi (or reservoir Pc as is)."""
+    """Lab Pc points moved onto the rock type: Sw from the sample's Swn and the rock type's
+    Swl, Pc from the sample's J and the rock type's k/phi (or reservoir Pc as is)."""
     sw, pc = [], []
     for s in pcs:
         sn = s.raw["sn"].to_numpy(float)
         m = (sn > 0) & (sn < 1)
-        sw.append(rt.swl + sn[m] * (1 - rt.swl - rt.sowcr))
+        sw.append(rt.swl + sn[m] * (1 - rt.swl))
         if isinstance(rt.pcow, LeverettJ) and "J" in s.raw:
             pc.append(s.raw["J"].to_numpy(float)[m] * rt.pcow.factor(rt.pc_units))
         else:
@@ -799,51 +956,80 @@ def denormalized_pc_points(pcs, rt: RockType):
     return np.concatenate(sw), np.concatenate(pc)
 
 
-def _plot_capillary(plt, name, pcs, rt, opts: PcOptions, filename):
-    fig, (ax_lab, ax_j, ax_rt) = plt.subplots(1, 3, figsize=(16, 5))
-    fig.suptitle(f"Capillary pressure QC — {name}", fontsize=13)
-    cmap = plt.get_cmap("tab10")
+def _sample_colors(plt, samples):
+    """Colors by lg k (with a colorbar mappable) when there are many samples, else tab10."""
+    import matplotlib as mpl
+
+    perms = [s.perm for s in samples]
+    if len(samples) <= 10 or not all(k > 0 for k in perms):
+        cmap = plt.get_cmap("tab10")
+        return [cmap(i % 10) for i in range(len(samples))], None
+    norm = mpl.colors.LogNorm(min(perms), max(perms))
+    sm = mpl.cm.ScalarMappable(norm=norm, cmap="viridis")
+    return [sm.to_rgba(k) for k in perms], sm
+
+
+def _plot_capillary(plt, name, pcs, rt, opts: PcOptions, filename, fits=None):
+    fig, (ax_lab, ax_j, ax_rt) = plt.subplots(1, 3, figsize=(17, 5.5))
+    fig.suptitle(f"Capillary pressure QC — {name} ({len(pcs)} samples)", fontsize=13)
+    colors, mappable = _sample_colors(plt, pcs)
+    legend = mappable is None
     excluded_labeled = False
-    for i, s in enumerate(pcs):
-        c = cmap(i % 10)
+    for s, c in zip(pcs, colors):
         d = s.raw
-        ax_lab.semilogy(d["sw"], d["pc_lab_bar"], "o-", mfc="none", color=c, lw=0.8,
-                        label=f"{s.sample} ({s.endpoints['system']})")
+        ax_lab.semilogy(d["sw"], d["pc_lab_bar"].where(d["pc_lab_bar"] > 0), "o-", mfc="none",
+                        color=c, lw=0.8, ms=4,
+                        label=f"{s.sample} ({s.endpoints['system']})" if legend else None)
         y = d["J"] if "J" in d else d["pc_res_bar"]
-        used = (d["sn"] > 0) & (d["sn"] < 1)
-        ax_j.loglog(d["sn"][used], y[used], "o", mfc="none", color=c, label=s.sample)
-        if (~used).any():  # Sw <= Swl or Sw >= 1 - Sorw: shown at the axis edge, not fitted
-            ax_j.loglog(d["sn"][~used].clip(lower=1e-2), y[~used], "x", color="gray",
-                        label="not used (Sn = 0 or 1)" if not excluded_labeled else None)
+        used = (d["sn"] > 0) & (d["sn"] < 1) & (y > 0)
+        ax_j.semilogy(d["sn"][used], y[used], "o", mfc="none", color=c, ms=4,
+                      label=s.sample if legend else None)
+        if (~used & (y > 0)).any():  # Swn = 0 or 1: not fitted
+            ax_j.semilogy(d["sn"][~used & (y > 0)], y[~used & (y > 0)], "x", color="gray",
+                          label="not used (Swn = 0 or 1)" if not excluded_labeled else None)
             excluded_labeled = True
-    sn = np.logspace(-2, 0, 100)
+    if mappable is not None:
+        for ax in (ax_lab, ax_j):
+            fig.colorbar(mappable, ax=ax, label="k, mD", pad=0.01)
+    sn = np.linspace(0.005, 1, 200)
     if isinstance(rt.pcow, LeverettJ):
         m = rt.pcow
-        ax_j.loglog(sn, m.a * sn ** -m.b, "k-", lw=2, label=f"J = {m.a:.3g}·Sn^-{m.b:.3g}")
+        for form, f in (fits or {m.form: {"a": m.a, "b": m.b, "rmse_swn": float("nan")}}).items():
+            jj = f["a"] * (np.exp(-f["b"] * sn) if form == "exp" else sn ** -f["b"])
+            expr = (f"{f['a']:.3g}·exp(−{f['b']:.3g}·Swn)" if form == "exp"
+                    else f"{f['a']:.3g}·Swn^−{f['b']:.3g}")
+            chosen = form == m.form
+            ax_j.semilogy(sn, jj, "k-" if chosen else "k--", lw=2.2 if chosen else 1.2,
+                          label=f"J = {expr}, rmse Swn {f['rmse_swn']:.3f}"
+                          + (" (used)" if chosen else ""))
         ax_j.set(ylabel="Leverett J (reservoir)")
         info = f"k = {m.perm:.3g} mD, φ = {m.poro:.3g}"
     else:
         m = rt.pcow
-        ax_j.loglog(sn, m.pe * 1e-5 / PRESSURE_UNITS[rt.pc_units] * sn ** (-1 / m.lam), "k-", lw=2,
-                    label=f"pe = {m.pe:.3g} {rt.pc_units}, λ = {m.lam:.3g}")
+        ax_j.semilogy(sn, m.pe * 1e-5 / PRESSURE_UNITS[rt.pc_units] * sn ** (-1 / m.lam), "k-",
+                      lw=2, label=f"pe = {m.pe:.3g} {rt.pc_units}, λ = {m.lam:.3g}")
         ax_j.set(ylabel="reservoir Pc, bar")
         info = "Brooks-Corey (no k/φ)"
     sw_pts, pc_pts = denormalized_pc_points(pcs, rt)
     sw = np.linspace(rt.swl, 1, 300)
-    ax_rt.plot(sw_pts, pc_pts, "o", mfc="none", color="gray", label="lab, moved to rock type")
+    ax_rt.plot(sw_pts, pc_pts, "o", mfc="none", color="gray", ms=4,
+               label="lab, moved to rock type")
     ax_rt.plot(sw, rt.pc_ow(sw), "k-", lw=2, label="rock type Pcow")
-    top = 1.05 * float(rt.pc_ow(sw).max())
+    top = float(np.nanpercentile(np.r_[pc_pts, rt.pc_ow(1.0)], 98)) * 1.3
+    top = max(top, 1.5 * float(rt.pc_ow(1.0)))
     ax_rt.set_ylim(0, top)
     ax_h = ax_rt.twinx()
     ax_h.set_ylim(0, float(height_above_fwl(top, opts.drho, rt.pc_units)))
     ax_h.set_ylabel(f"height above FWL, m (Δρ = {opts.drho:g} kg/m³)")
     ax_lab.set(title="Lab Pc (as measured, bar)", xlabel="Sw", ylabel="Pc lab, bar", xlim=(0, 1))
-    ax_j.set(title=f"Pooled fit: {info}", xlabel="Sn = (Sw − Swl) / (1 − Swl − Sorw)")
+    ax_j.set(title=f"Pooled fit: {info}", xlabel="Swn = (Sw − Swirr) / (1 − Swirr)", xlim=(0, 1))
     ax_rt.set(title=f"Reservoir oil-water Pc (σ={opts.ift_res:g}, θ={opts.theta_res:g}°)",
               xlabel="Sw", ylabel=f"Pcow, {rt.pc_units}", xlim=(0, 1))
     for ax in (ax_lab, ax_j, ax_rt):
         ax.grid(which="both", alpha=0.3)
-        ax.legend(fontsize=7)
+        handles, _ = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(fontsize=7)
     fig.tight_layout()
     fig.savefig(filename, dpi=110)
     plt.close(fig)

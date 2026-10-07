@@ -19,10 +19,10 @@ def test_brooks_corey_pcow():
     rt = RockType(pcow={"model": "brooks-corey", "pe": 0.1, "lam": 2.0, "pcmax": 3.0})
     assert isinstance(rt.pcow, BrooksCorey)
     assert rt.pc_ow(rt.swl) == pytest.approx(3.0)            # capped
-    assert rt.pc_ow(1 - rt.sowcr) == pytest.approx(0.1)      # entry pressure
-    assert rt.pc_ow(1.0) == pytest.approx(0.1)
+    assert rt.pc_ow(1.0) == pytest.approx(0.1)               # entry pressure
+    assert rt.pc_ow(1 - rt.sowcr) > 0.1                      # drainage: Sorw plays no role
     sn = 0.25
-    sw = rt.swl + sn * (1 - rt.swl - rt.sowcr)
+    sw = rt.swl + sn * (1 - rt.swl)                          # Swn = (Sw - Swl) / (1 - Swl)
     assert rt.pc_ow(sw) == pytest.approx(0.1 * sn ** -0.5)
     pc = rt.water_oil_table(30)["Pcow"]
     assert np.all(np.isfinite(pc)) and np.all(np.diff(pc) <= 0)  # SWOF: non-increasing
@@ -61,7 +61,7 @@ def test_height_above_fwl():
     # 1 bar with 250 kg/m3 -> 1e5 / (250 * 9.80665) = 40.8 m
     assert height_above_fwl(1.0, 250, "bar") == pytest.approx(40.79, rel=1e-3)
     rt = RockType(pcow=BrooksCorey(pe=0.1, lam=2, pcmax=3))
-    assert rt.height_above_fwl(1 - rt.sowcr, 250) == pytest.approx(4.079, rel=1e-3)
+    assert rt.height_above_fwl(1.0, 250) == pytest.approx(4.079, rel=1e-3)
 
 
 def test_validation():
