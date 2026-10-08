@@ -1,6 +1,7 @@
 name: build-exe
 # Single-file Windows program: relperm.exe (no Python needed on the user's machine).
 # Download it from the run page: Actions -> build-exe -> Artifacts -> relperm-windows.
+# relperm-console.exe is the same program with a console window, for diagnostics.
 on:
   push:
     branches: [main, "claude/**"]
@@ -12,20 +13,39 @@ jobs:
   windows-exe:
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      PYI_ARGS: >-
+        --onefile --noconfirm
+        --hidden-import openpyxl
+        --hidden-import matplotlib.backends.backend_tkagg
+        --collect-submodules relperm
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install ".[scal]" pyinstaller
-      - name: Check tkinter (file dialogs)
+      - name: Check tkinter (window toolkit)
         run: python -c "import tkinter; print(tkinter.TkVersion)"
       - name: Build relperm.exe (windowed, for users)
-        run: pyinstaller --onefile --windowed --name relperm --noconfirm --hidden-import openpyxl packaging/relperm_gui.py
+        shell: pwsh
+        run: pyinstaller $env:PYI_ARGS.Split(' ') --windowed --name relperm packaging/relperm_gui.py
       # A windowed exe reports errors in a message box that nobody can close on CI, so the
-      # smoke test runs the same program built as a console exe: errors land in the log.
-      - name: Build console twin for the smoke test
-        run: pyinstaller --onefile --console --name relperm-console --noconfirm --hidden-import openpyxl --distpath dist-console --workpath build-console packaging/relperm_gui.py
+      # tests run the same program built as a console exe: errors land in the log.
+      - name: Build console twin
+        shell: pwsh
+        run: pyinstaller $env:PYI_ARGS.Split(' ') --console --name relperm-console --distpath dist-console --workpath build-console packaging/relperm_gui.py
+      - name: Smoke test - the window opens (TkAgg) and closes
+        timeout-minutes: 3
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          $out = ./dist-console/relperm-console.exe --selftest 2>&1 | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0 -or $out -notmatch "backend: tkagg" -or $out -notmatch "selftest ok") {
+            Write-Error "the editor window did not start"; exit 1
+          }
       - name: Smoke test - process the example report
         timeout-minutes: 10
         shell: pwsh
@@ -38,8 +58,14 @@ jobs:
           if (!(Test-Path smoke/scal_report.xlsx) -or !(Test-Path smoke/relperm_eclipse.inc)) {
             Write-Error "relperm did not produce the report"; exit 1
           }
+      - name: Collect files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item dist/relperm.exe out/
+          Copy-Item dist-console/relperm-console.exe out/
       - uses: actions/upload-artifact@v4
         with:
           name: relperm-windows
-          path: dist/relperm.exe
+          path: out/
           retention-days: 90
